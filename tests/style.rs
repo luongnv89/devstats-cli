@@ -124,3 +124,30 @@ fn per_org_adds_one_box_per_org() {
     assert_eq!(out.matches("╭─┐").count(), 3, "{out}");
     assert!(out.contains("acme · top 2 by commits"));
 }
+
+#[test]
+fn top_values_are_highlighted_unless_color_is_off() {
+    use devstats::style::theme::{style, Role};
+    use devstats::style::Tier;
+    let mut server = mockito::Server::new();
+    let _m = mock_acme(&mut server);
+    // TERM=xterm-256color: the 256-color form of the lead role.
+    let lead = style(Role::Lead, Tier::Ansi256).render().to_string();
+    let out = String::from_utf8(stdout_of(&server, &[("FORCE_COLOR", "1")], &[])).unwrap();
+    // alice leads +lines (1,020) and repos (2); her row carries the highlight.
+    let alice = out.lines().find(|l| l.contains("alice")).unwrap();
+    assert!(alice.contains(&format!("{lead}1,020")), "{alice}");
+    for env in [
+        vec![("FORCE_COLOR", "1"), ("NO_COLOR", "1")],
+        vec![("FORCE_COLOR", "1")],
+    ] {
+        let args: Vec<&str> = if env.len() == 1 {
+            vec!["--no-color"]
+        } else {
+            vec![]
+        };
+        let out = String::from_utf8(stdout_of(&server, &env, &args)).unwrap();
+        assert!(!out.contains(&lead), "{out}");
+        assert!(!out.as_bytes().contains(&ESC), "{out}");
+    }
+}

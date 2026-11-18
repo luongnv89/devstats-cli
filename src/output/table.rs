@@ -1,7 +1,7 @@
 //! `--format table` on a styled stdout: summary box and contributors table (btop look).
 
 use crate::model::{Contributor, PrivateAccess, Report};
-use crate::style::components::{boxed, meter, sparkline, table, Col, Line};
+use crate::style::components::{boxed, meter_with, sparkline, table, Col, Line};
 use crate::style::theme::Role;
 use crate::style::{sanitize, truncate, width, Mode};
 
@@ -26,11 +26,21 @@ pub fn compact(n: u64) -> (String, &'static str) {
     }
 }
 
-fn num(mode: &Mode, n: u64) -> Line {
+fn num(mode: &Mode, role: Role, n: u64) -> Line {
     let (v, unit) = compact(n);
-    let mut l = Line::of(mode, Role::Text, &v);
+    let mut l = Line::of(mode, role, &v);
     l.push(mode, Role::Dim, unit);
     l
+}
+
+/// Which values lead their column: every value equal to the highest one, so ties
+/// all lead. Nothing leads in a column of zeros or in a table of one row, where
+/// there is no other value to stand out from.
+fn leaders(values: impl IntoIterator<Item = u64>) -> Vec<bool> {
+    let values: Vec<u64> = values.into_iter().collect();
+    let max = values.iter().copied().max().unwrap_or(0);
+    let on = max > 0 && values.len() > 1;
+    values.iter().map(|&v| on && v == max).collect()
 }
 
 fn sep(mode: &Mode) -> &'static str {
@@ -279,42 +289,69 @@ fn contributor_lines(
         Col::new("activity 52w", false, 7),
     ];
     let logins: Vec<String> = list.iter().map(|c| sanitize(&c.login, false)).collect();
+    let peaks: Vec<u64> = list
+        .iter()
+        .map(|c| c.activity.iter().copied().max().unwrap_or(0))
+        .collect();
+    // The highest value of each metric column is drawn in `Role::Lead` (per box).
+    // Share is commits over the same total, so it leads exactly where commits do.
+    let lead_commits = leaders(list.iter().map(|c| c.commits));
+    let lead_additions = leaders(list.iter().map(|c| c.additions));
+    let lead_deletions = leaders(list.iter().map(|c| c.deletions));
+    let lead_prs = leaders(list.iter().map(|c| c.prs));
+    let lead_merged = leaders(list.iter().map(|c| c.prs_merged));
+    let lead_issues = leaders(list.iter().map(|c| c.issues));
+    let lead_repos = leaders(list.iter().map(|c| c.repos as u64));
+    let lead_peak = leaders(peaks.iter().copied());
     let rows: Vec<Vec<Line>> = list
         .iter()
         .zip(&logins)
         .enumerate()
         .map(|(i, (c, login))| {
-            let peak = c.activity.iter().copied().max().unwrap_or(0);
+            let role = |lead: &[bool], base: Role| if lead[i] { Role::Lead } else { base };
+            let key_role = |lead: &[bool], k: crate::cli::SortKey| {
+                role(lead, if k == sort { Role::Title } else { Role::Text })
+            };
             let mut activity = sparkline(mode, &c.activity, None);
             if activity.width > 0 {
                 activity.pad(1);
             }
-            activity.push(mode, Role::Dim, &format!("{}/wk", thousands(peak)));
-            let key_role =
-                |k: crate::cli::SortKey| if k == sort { Role::Title } else { Role::Text };
+            activity.push(
+                mode,
+                role(&lead_peak, Role::Dim),
+                &format!("{}/wk", thousands(peaks[i])),
+            );
             vec![
                 Line::of(mode, Role::Dim, &(i + 1).to_string()),
                 Line::of(mode, Role::Text, login),
                 Line::of(
                     mode,
-                    key_role(crate::cli::SortKey::Commits),
+                    key_role(&lead_commits, crate::cli::SortKey::Commits),
                     &thousands(c.commits),
                 ),
-                num(mode, c.additions),
-                num(mode, c.deletions),
-                Line::of(mode, key_role(crate::cli::SortKey::Prs), &thousands(c.prs)),
-                Line::of(mode, Role::Text, &thousands(c.prs_merged)),
+                num(mode, role(&lead_additions, Role::Text), c.additions),
+                num(mode, role(&lead_deletions, Role::Text), c.deletions),
                 Line::of(
                     mode,
-                    key_role(crate::cli::SortKey::Issues),
+                    key_role(&lead_prs, crate::cli::SortKey::Prs),
+                    &thousands(c.prs),
+                ),
+                Line::of(
+                    mode,
+                    role(&lead_merged, Role::Text),
+                    &thousands(c.prs_merged),
+                ),
+                Line::of(
+                    mode,
+                    key_role(&lead_issues, crate::cli::SortKey::Issues),
                     &thousands(c.issues),
                 ),
                 Line::of(
                     mode,
-                    key_role(crate::cli::SortKey::Repos),
+                    key_role(&lead_repos, crate::cli::SortKey::Repos),
                     &thousands(c.repos as u64),
                 ),
-                meter(mode, c.share, 10),
+                meter_with(mode, c.share, 10, role(&lead_commits, Role::Text)),
                 activity,
             ]
         })
@@ -334,6 +371,7 @@ mod tests {
     use super::*;
     use crate::cli::SortKey;
     use crate::model::{OrgReport, Range, Totals};
+    use crate::style::theme::paint;
     use crate::style::{Glyphs, Tier};
 
     #[test]
@@ -382,6 +420,105 @@ mod tests {
             weekly: vec![],
             notes: vec![],
         }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn person(
+        login: &str,
+        commits: u64,
+        additions: u64,
+        deletions: u64,
+        prs: u64,
+        repos: usize,
+        share: f64,
+        peak: u64,
+    ) -> Contributor {
+        Contributor {
+            login: login.into(),
+            html_url: String::new(),
+            avatar_url: String::new(),
+            commits,
+            additions,
+            deletions,
+            prs,
+            prs_merged: 0,
+            issues: 0,
+            repos,
+            orgs: vec![],
+            share,
+            activity: vec![0, peak],
+        }
+    }
+
+    fn sample() -> Vec<Contributor> {
+        vec![
+            person("ana", 40, 1_000, 9, 3, 2, 44.4, 7),
+            person("bo", 40, 200, 9, 1, 1, 44.4, 3),
+            person("cy", 10, 1_000, 2, 1, 1, 11.1, 2),
+        ]
+    }
+
+    #[test]
+    fn the_highest_value_of_each_metric_column_leads() {
+        let m = Mode::styled(Tier::Ansi16, Glyphs::Unicode, 200);
+        let lead = |s: &str| paint(&m, Role::Lead, s);
+        let lines = contributor_lines(&m, &sample(), 200, SortKey::Commits);
+        let rows: Vec<&str> = lines[1..].iter().map(|l| l.text.as_str()).collect();
+        let (ana, bo, cy) = (rows[0], rows[1], rows[2]);
+        // commits: a tie at 40 leads in both rows, and the sort column's other values stay bold.
+        assert!(
+            ana.contains(&lead("40")) && bo.contains(&lead("40")),
+            "{ana}\n{bo}"
+        );
+        assert!(cy.contains(&paint(&m, Role::Title, "10")), "{cy}");
+        assert!(!cy.contains(&lead("10")), "{cy}");
+        // +lines tie at 1,000; −lines and PRs lead in one place each.
+        assert!(ana.contains(&lead("1,000")) && cy.contains(&lead("1,000")));
+        assert!(!bo.contains(&lead("200")), "{bo}");
+        assert!(ana.contains(&lead("9")) && bo.contains(&lead("9")));
+        assert!(!cy.contains(&lead("2")), "{cy}");
+        assert!(ana.contains(&lead("3")) && !bo.contains(&lead("1")));
+        // repos, share (follows commits) and the activity peak.
+        assert!(ana.contains(&lead("2")));
+        assert!(ana.contains(&lead(" 44%")) && bo.contains(&lead(" 44%")));
+        assert!(!cy.contains(&lead(" 11%")), "{cy}");
+        assert!(ana.contains(&lead("7/wk")) && !bo.contains(&lead("3/wk")));
+        // merged and issues are all zero: nothing leads there.
+        assert!(rows.iter().all(|r| !r.contains(&lead("0"))), "{rows:?}");
+        // Rank and contributor name are never highlighted.
+        for (i, (row, name)) in rows.iter().zip(["ana", "bo", "cy"]).enumerate() {
+            assert!(
+                row.starts_with(&paint(&m, Role::Dim, &(i + 1).to_string())),
+                "{row}"
+            );
+            assert!(!row.contains(&lead(name)), "{row}");
+        }
+        // Exactly the leading cells: ana 7 (all but merged/issues), bo 3, cy 1 (+lines).
+        let count = |r: &str| r.matches("\x1b[96m").count();
+        assert_eq!((count(ana), count(bo), count(cy)), (7, 3, 1), "{rows:?}");
+        // The header row is never highlighted.
+        assert!(!lines[0].text.contains("\x1b[96m"), "{}", lines[0].text);
+    }
+
+    #[test]
+    fn no_highlight_without_color_or_for_a_single_row() {
+        let none = Mode::styled(Tier::None, Glyphs::Unicode, 200);
+        for l in contributor_lines(&none, &sample(), 200, SortKey::Commits) {
+            assert!(!l.text.contains('\x1b'), "{}", l.text);
+        }
+        let m = Mode::styled(Tier::Ansi16, Glyphs::Unicode, 200);
+        let one = &sample()[..1];
+        for l in contributor_lines(&m, one, 200, SortKey::Commits) {
+            assert!(!l.text.contains("\x1b[96m"), "{}", l.text);
+        }
+    }
+
+    #[test]
+    fn leaders_include_ties_and_skip_zero_columns() {
+        assert_eq!(leaders([3, 5, 5, 1]), [false, true, true, false]);
+        assert_eq!(leaders([0, 0]), [false, false]);
+        assert_eq!(leaders([4]), [false]);
+        assert_eq!(leaders([]), Vec::<bool>::new());
     }
 
     fn footer_line(out: &str) -> &str {

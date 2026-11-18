@@ -126,8 +126,10 @@ For a user account, GitHub lists only public repositories, so only those are sca
 ### Output
 
 - **Terminal:** a summary box and a ranked table with a share meter and a 52-week braille
-  activity graph. Columns drop out on narrow terminals. The glyphs fall back to ASCII
-  outside a UTF-8 locale.
+  activity graph. The highest value in each metric column is shown in bold cyan, and ties
+  are all highlighted; `--no-color` and `NO_COLOR` turn this off with the other colors.
+  Columns drop out on narrow terminals. The glyphs fall back to ASCII outside a UTF-8
+  locale.
 - **Piped, or `--format tsv`:** one contributor per line, tab-separated, with no header and
   no escape codes. The fields are `login, commits, additions, deletions, prs, prs_merged,
   issues, repos, orgs`.

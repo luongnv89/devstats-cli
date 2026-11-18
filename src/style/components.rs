@@ -127,6 +127,11 @@ pub fn boxed(
 
 /// Meter of `cells` cells followed by the right-aligned percentage (` 72%`).
 pub fn meter(mode: &Mode, value: f64, cells: usize) -> Line {
+    meter_with(mode, value, cells, Role::Text)
+}
+
+/// [`meter`] with the percentage drawn in `pct_role`.
+pub fn meter_with(mode: &Mode, value: f64, cells: usize, pct_role: Role) -> Line {
     let mut l = Line::new();
     for i in 1..=cells {
         let pos = round_half_up(i as f64 * 100.0 / cells as f64);
@@ -145,7 +150,7 @@ pub fn meter(mode: &Mode, value: f64, cells: usize) -> Line {
         " {:>3}",
         format!("{}%", round_half_up(value.clamp(0.0, 999.0)))
     );
-    l.push(mode, Role::Text, &pct);
+    l.push(mode, pct_role, &pct);
     l
 }
 
