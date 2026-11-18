@@ -157,6 +157,64 @@ devstats --completions zsh  > "${fpath[1]}/_devstats"
 devstats --completions fish > ~/.config/fish/completions/devstats.fish
 ```
 
+## Examples
+
+Two real runs, one per organization, over the last 3 months. Both were captured on
+2026-11-18 in a 100-column terminal with a token that isn't a member of either
+organization, so only public repositories were scanned.
+
+### openai
+
+```bash
+devstats https://github.com/openai --period 3m --top 10
+```
+
+```text
+╭─┐devstats · openai┌──────────────────────────────────────────────────────────────────────────────╮
+│ 1 org   245 repos   16,421 contributors   10,413 commits   +13.33M / −2.64M lines                │
+│ 8,252 PRs (6,223 merged)   19,366 issues                                                         │
+╰─┘2026-11-18 · last 3 months (since 2026-08-18) · public repos only└──────────────────────────────╯
+╭─┐contributors · top 10 by commits┌───────────────────────────────────────────────────────────────╮
+│  #  contributor     commits  +lines  −lines    PRs  merged  issues  repos  share                 │
+│  1  jbeckwith-oai     1,311   1.90M  321.0K  1,246   1,190       9     15  ■········· 13%        │
+│  2  mldangelo-oai     1,240  824.0K  378.9K  1,240   1,150       1      2  ■········· 12%        │
+│  3  jif-oai             560       0       0      1       0       0      1  ··········  5%        │
+│  4  etraut-openai       539       0       0      0       0       0      1  ··········  5%        │
+│  5  markstuart-oai      384  479.6K   86.2K  1,455   1,277      12     10  ··········  4%        │
+│  6  seratch             319  202.2K   62.9K    238     231       0      4  ··········  3%        │
+│  7  apcha-oai           267  965.3K  343.6K    276     254       0      6  ··········  3%        │
+│  8  HAYDEN-OAI          265  104.8K   14.3K    204     194       1      8  ··········  3%        │
+│  9  bc-openai           264       0       0      0       0       0      1  ··········  3%        │
+│ 10  saioai              257  371.1K   21.0K    217     196       1      1  ··········  2%        │
+╰─┘16,421 contributors · sorted by commits · --top 0 shows all└────────────────────────────────────╯
+```
+
+### anthropics
+
+```bash
+devstats https://github.com/anthropics --period 3m --top 10
+```
+
+```text
+╭─┐devstats · anthropics┌──────────────────────────────────────────────────────────────────────────╮
+│ 1 org   93 repos   20,929 contributors   3,089 commits   +30.91M / −328.7K lines                 │
+│ 4,375 PRs (1,212 merged)   25,107 issues                                                         │
+╰─┘2026-11-18 · last 3 months (since 2026-08-18) · public repos only└──────────────────────────────╯
+╭─┐contributors · top 10 by commits┌───────────────────────────────────────────────────────────────╮
+│  #  contributor        commits  +lines  −lines  PRs  merged  issues  repos  share                │
+│  1  claude                 632  14.07M   54.5K    0       0       0     23  ■■········ 20%       │
+│  2  actions-user           521   38.5K   11.6K    0       0       0      5  ■········· 17%       │
+│  3  iainmcgin              246   98.0K   10.4K   37      35      60      2  ··········  8%       │
+│  4  mhegazy                191   32.9K   38.4K  157     144       1      4  ··········  6%       │
+│  5  fallintoplace          154   29.9K   2,596    0       0       0      1  ··········  5%       │
+│  6  poteat                 105   48.0K   7,626   43      36       1      1  ··········  3%       │
+│  7  ronleizrowice-ant      100   44.2K   6,694   99      81       0      1  ··········  3%       │
+│  8  jordanecker-ant         70     895     778   82      71       0      3  ··········  2%       │
+│  9  dtmeadows-ant           69   14.7K   1,693    1       1       0      9  ··········  2%       │
+│ 10  UlisesGascon            53   4,784       1   52      52       1      1  ··········  2%       │
+╰─┘20,929 contributors · sorted by commits · --top 0 shows all└────────────────────────────────────╯
+```
+
 ## How the numbers are counted
 
 - **Commits and lines** come from GitHub's contributor statistics
