@@ -1,6 +1,6 @@
 [package]
 name = "devstats"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 rust-version = "1.82"
 description = "Contribution stats for every contributor across GitHub organizations, in the terminal or as an HTML report"
@@ -34,5 +34,5 @@ unicode-width = "0.2"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 
 [profile.release]
-lto = true
+lto = "thin"
 strip = true
