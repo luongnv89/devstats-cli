@@ -185,3 +185,81 @@ fn short_rate_limit_is_waited_out() {
         .stderr(predicate::str::contains("waiting 2s"));
     limited.assert();
 }
+
+#[test]
+fn search_counts_prs_and_issues_and_splits_big_ranges() {
+    let mut server = mockito::Server::new();
+    let today = chrono::Utc::now().date_naive();
+    let full = server
+        .mock("GET", mockito::Matcher::Regex(format!(r"is:pr\+created:2008-01-01\.\.{today}&")))
+        .with_status(200)
+        .with_body(json!({"total_count": 1500, "items": []}).to_string())
+        .expect(1)
+        .create();
+    let halves = server
+        .mock("GET", mockito::Matcher::Regex(r"^/search/issues\?q=org:acme\+is:pr".into()))
+        .with_status(200)
+        .with_body(json!({"total_count": 2, "items": [search_item("alice", true), search_item("renovate[bot]", true)]}).to_string())
+        .expect(2)
+        .create();
+    let issues = server
+        .mock("GET", mockito::Matcher::Regex(r"^/search/issues\?q=org:acme\+is:issue".into()))
+        .with_status(200)
+        .with_body(json!({"total_count": 1, "items": [search_item("carol", false)]}).to_string())
+        .create();
+    let _m = mock_acme(&mut server);
+    let r = run_json(&server, &[]);
+    full.assert();
+    halves.assert();
+    issues.assert();
+    let alice = r["contributors"].as_array().unwrap().iter().find(|c| c["login"] == "alice").unwrap();
+    assert_eq!((alice["prs"].as_u64(), alice["prs_merged"].as_u64()), (Some(2), Some(2)));
+    let carol = r["contributors"].as_array().unwrap().iter().find(|c| c["login"] == "carol").unwrap();
+    assert_eq!(carol["issues"], 1);
+    assert_eq!(carol["commits"], 0);
+    assert_eq!(r["totals"]["prs"], 2, "bot PRs are excluded");
+}
+
+#[test]
+fn html_report_is_self_contained_and_escapes_data() {
+    let mut server = mockito::Server::new();
+    let _s = json_mock(&mut server, "/repos/acme/web/stats/contributors", 200, json!([author("x</script><img src=x onerror=alert(1)>", &[(1, 1, 1, 1)])]));
+    let _m = mock_acme(&mut server);
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("out.html");
+    devstats()
+        .args(["acme", "--format", "tsv", "--api-url", &server.url()])
+        .arg(format!("--html={}", path.display()))
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("wrote"))
+        .stdout(predicate::str::starts_with("alice\t"));
+    let html = std::fs::read_to_string(&path).unwrap();
+    assert!(html.starts_with("<!doctype html>"));
+    assert!(!html.contains("__DEVSTATS_DATA__"));
+    assert!(!html.contains("<script src") && !html.contains("<link rel=\"stylesheet\""), "no external assets");
+    assert_eq!(html.matches("</script>").count(), 2, "embedded data cannot close the script tag");
+    let start = html.find(r#"id="devstats-data">"#).unwrap() + r#"id="devstats-data">"#.len();
+    let end = start + html[start..].find("</script>").unwrap();
+    let data: Value = serde_json::from_str(&html[start..end]).expect("embedded JSON parses");
+    assert_eq!(data["contributors"][0]["login"], "alice");
+    assert!(data["contributors"].as_array().unwrap().iter().any(|c| c["login"].as_str().unwrap().contains("</script>")));
+}
+
+#[test]
+fn html_default_path_and_unwritable_path() {
+    let mut server = mockito::Server::new();
+    let _m = mock_acme(&mut server);
+    let dir = tempfile::tempdir().unwrap();
+    devstats()
+        .current_dir(dir.path())
+        .args(["acme", "--format", "tsv", "--api-url", &server.url(), "--html"])
+        .assert()
+        .success();
+    assert!(dir.path().join("devstats-report.html").exists());
+    devstats()
+        .args(["acme", "--api-url", &server.url(), "--html=/nonexistent-dir/x.html"])
+        .assert()
+        .code(1)
+        .stderr(predicate::str::contains("cannot write the HTML report"));
+}

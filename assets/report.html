@@ -1,0 +1,657 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="generator" content="devstats">
+<title>devstats report</title>
+<style>
+/*
+ * devstats report — "terminal echo".
+ * Palette (strict): black, white, gray #6B7280, green #22C55E. Green is only ever a
+ * line, border, caret or dark-mode text — never a fill. Measured contrast:
+ *   light: ink #000 on #fff 21:1 · muted #6B7280 on #fff 4.8:1 · green on #fff 2.3:1
+ *          → in light mode green is decorative only; data marks use ink.
+ *   dark:  ink #fff on #000 21:1 · green on #000 9.2:1 · #6B7280 on #000 4.3:1
+ *          → dark muted text uses white at 66% (≈8:1); gray stays for lines/marks.
+ * Type: no web fonts (the file must work offline), so a mono stack carries titles and
+ * numbers like the CLI does, and a humanist sans stack carries the little prose there is.
+ */
+:root {
+  --bg: #ffffff;
+  --ink: #000000;
+  --muted: #6B7280;
+  --line: rgba(107, 114, 128, .32);
+  --line-strong: #6B7280;
+  --grid: rgba(107, 114, 128, .16);
+  --hover: rgba(107, 114, 128, .05); /* light: keeps muted text ≥4.5:1 on hovered rows */
+  --surface: #ffffff;
+  --raise: 0 1px 0 rgba(0, 0, 0, .04), 0 10px 28px -16px rgba(0, 0, 0, .22);
+  --mark: #000000;          /* primary data marks */
+  --mark-2: #6B7280;        /* secondary data marks (deletions, area wash) */
+  --data-line: #000000;     /* timeline stroke */
+  --accent: #22C55E;        /* decorative: notches, caret, active rules */
+  --accent-text: #000000;   /* text that wants emphasis */
+  --focus: #000000;
+  --mono: ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Code", "Iosevka", Menlo, Consolas, "Liberation Mono", monospace;
+  --sans: "Avenir Next", "Segoe UI Variable Text", "Segoe UI", Seravek, "Gill Sans Nova", Ubuntu, Calibri, "DejaVu Sans", sans-serif;
+  --r: 12px;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #000000; --ink: #ffffff; --muted: rgba(255, 255, 255, .66);
+    --line: rgba(107, 114, 128, .55); --grid: rgba(107, 114, 128, .28); --hover: rgba(107, 114, 128, .28);
+    --surface: rgba(255, 255, 255, .025);
+    --raise: 0 0 0 1px rgba(255, 255, 255, .02), 0 16px 40px -24px rgba(0, 0, 0, .9);
+    --mark: #ffffff; --mark-2: #6B7280; --data-line: #22C55E; --accent-text: #22C55E; --focus: #22C55E;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #000000; --ink: #ffffff; --muted: rgba(255, 255, 255, .66);
+  --line: rgba(107, 114, 128, .55); --grid: rgba(107, 114, 128, .28); --hover: rgba(107, 114, 128, .28);
+  --surface: rgba(255, 255, 255, .025);
+  --raise: 0 0 0 1px rgba(255, 255, 255, .02), 0 16px 40px -24px rgba(0, 0, 0, .9);
+  --mark: #ffffff; --mark-2: #6B7280; --data-line: #22C55E; --accent-text: #22C55E; --focus: #22C55E;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0; background: var(--bg); color: var(--ink);
+  font: 15px/1.5 var(--sans);
+  /* faint scanline texture: the only "atmosphere", kept within the palette */
+  background-image: repeating-linear-gradient(0deg, transparent 0 3px, var(--grid) 3px 4px);
+  background-size: 100% 4px; background-attachment: fixed;
+  background-blend-mode: normal;
+}
+body::before { /* veil the scanlines so they read as texture, not stripes */
+  content: ""; position: fixed; inset: 0; background: var(--bg); opacity: .86; pointer-events: none; z-index: -1;
+}
+a { color: inherit; text-decoration-color: var(--line-strong); text-underline-offset: 3px; }
+a:hover { text-decoration-color: var(--accent); }
+:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: 4px; }
+.wrap { max-width: 1240px; margin: 0 auto; padding: 28px 16px 64px; }
+@media (min-width: 720px) { .wrap { padding: 40px 32px 80px; } }
+.mono, .num { font-family: var(--mono); }
+.num { font-variant-numeric: tabular-nums; }
+.muted { color: var(--muted); }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+/* ---------- header ---------- */
+.top { display: grid; gap: 18px; grid-template-columns: 1fr auto; align-items: end; margin-bottom: 34px; }
+.brand { font: 600 13px/1 var(--mono); letter-spacing: .02em; display: flex; align-items: center; gap: 10px; color: var(--muted); }
+.brand b { color: var(--ink); font-weight: 700; }
+.caret { display: inline-block; width: .6em; height: 1.05em; border-left: 2px solid var(--accent); animation: blink 1.1s steps(1) infinite; }
+@keyframes blink { 50% { opacity: 0; } }
+h1 { font: 700 clamp(26px, 4.4vw, 46px)/1.08 var(--mono); letter-spacing: -.035em; margin: 14px 0 10px; overflow-wrap: anywhere; }
+h1 .sep { color: var(--muted); font-weight: 400; }
+.meta { font: 13px/1.6 var(--mono); color: var(--muted); display: flex; flex-wrap: wrap; gap: 4px 18px; }
+.meta a { color: var(--ink); }
+.tools { display: flex; gap: 8px; }
+.btn {
+  font: 600 12px/1 var(--mono); color: var(--ink); background: var(--surface);
+  border: 1px solid var(--line-strong); border-radius: 8px; padding: 9px 12px; cursor: pointer;
+  transition: border-color .15s, transform .15s;
+}
+.btn:hover { border-color: var(--accent); }
+.btn:active { transform: translateY(1px); }
+
+/* ---------- the titled box: ╭─┐ title ┌───╮ ---------- */
+.box {
+  position: relative; border: 1px solid var(--line-strong); border-radius: var(--r);
+  background: var(--surface); box-shadow: var(--raise);
+  padding: 30px 18px 18px; margin-top: 30px; min-width: 0;
+  animation: rise .5s cubic-bezier(.2, .7, .2, 1) both;
+}
+@media (min-width: 720px) { .box { padding: 32px 26px 24px; } }
+.box > h2 {
+  position: absolute; top: -.78em; left: 16px; margin: 0; padding: 0 2px;
+  font: 700 13px/1.5 var(--mono); letter-spacing: .01em; background: var(--bg);
+  display: flex; align-items: center; gap: 0;
+}
+.box > h2::before, .box > h2::after { color: var(--line-strong); font-weight: 400; }
+.box > h2::before { content: "─┐ "; }
+.box > h2::after { content: " ┌─"; }
+.box > h2 .count { color: var(--muted); font-weight: 400; margin-left: .6em; }
+.box .foot { margin-top: 16px; font: 12px/1.5 var(--mono); color: var(--muted); }
+@keyframes rise { from { opacity: 0; transform: translateY(10px); } }
+.box:nth-of-type(2) { animation-delay: .06s; } .box:nth-of-type(3) { animation-delay: .12s; }
+.box:nth-of-type(4) { animation-delay: .18s; } .box:nth-of-type(5) { animation-delay: .24s; }
+.box:nth-of-type(6) { animation-delay: .30s; }
+.grid2 { display: grid; gap: 0 26px; grid-template-columns: minmax(0, 1fr); }
+@media (min-width: 980px) { .grid2 { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } }
+
+/* ---------- KPI tiles ---------- */
+.kpis { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1px; background: var(--line); border-radius: 8px; overflow: hidden; }
+@media (min-width: 640px) { .kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (min-width: 1080px) { .kpis { grid-template-columns: repeat(6, minmax(0, 1fr)); } }
+.kpi { background: var(--bg); padding: 16px 16px 14px; position: relative; }
+.kpi .v { font: 700 clamp(24px, 3vw, 34px)/1.05 var(--mono); letter-spacing: -.04em; font-variant-numeric: tabular-nums; }
+.kpi .v small { font-size: .5em; letter-spacing: 0; color: var(--muted); font-weight: 500; margin-left: 2px; }
+.kpi .l { font: 12px/1.4 var(--sans); color: var(--muted); margin-top: 6px; }
+.kpi:first-child::after { /* the one green rule on the page's headline number */
+  content: ""; position: absolute; left: 16px; right: 16px; bottom: 0; border-bottom: 2px solid var(--accent);
+}
+
+/* ---------- segmented control ---------- */
+.seg { display: inline-flex; border: 1px solid var(--line-strong); border-radius: 8px; padding: 2px; gap: 2px; margin-bottom: 16px; flex-wrap: wrap; }
+.seg button {
+  font: 600 12px/1 var(--mono); color: var(--muted); background: transparent; border: 0; border-radius: 6px;
+  padding: 8px 11px; cursor: pointer; border-bottom: 2px solid transparent;
+}
+.seg button:hover { color: var(--ink); }
+.seg button[aria-pressed="true"] { color: var(--ink); border-bottom-color: var(--accent); background: var(--grid); }
+
+/* ---------- charts ---------- */
+svg { display: block; overflow: visible; }
+.chart text { font: 12px var(--mono); fill: var(--muted); }
+.chart .lbl { fill: var(--ink); }
+.chart .val { fill: var(--ink); font-weight: 600; }
+.bar { fill: var(--mark); transform-origin: left; transform-box: fill-box; animation: grow .7s cubic-bezier(.2, .7, .2, 1) both; }
+@keyframes grow { from { transform: scaleX(0); } }
+.hit { fill: transparent; cursor: default; }
+.row:hover .bar, .row:focus .bar { stroke: var(--accent); stroke-width: 2px; paint-order: stroke; }
+.row:hover .lbl, .row:focus .lbl { text-decoration: underline; text-decoration-color: var(--accent); }
+.row:focus { outline: none; }
+.row:focus-visible .hit { stroke: var(--focus); stroke-width: 2px; }
+.axis { stroke: var(--line-strong); stroke-width: 1; }
+.gridline { stroke: var(--grid); stroke-width: 1; }
+.lol-add { stroke: var(--mark); stroke-width: 2px; stroke-linecap: round; }
+.dot-add { fill: var(--mark); }
+.lol-del { stroke: var(--mark-2); stroke-width: 2px; stroke-linecap: round; }
+.dot-del { fill: var(--bg); stroke: var(--mark-2); stroke-width: 2px; }
+.legend { display: flex; gap: 18px; flex-wrap: wrap; font: 12px var(--mono); color: var(--muted); margin: -4px 0 14px; }
+.legend i { display: inline-block; width: 18px; height: 0; border-top: 2px solid; vertical-align: middle; margin-right: 6px; position: relative; top: -1px; }
+.legend .add i { border-color: var(--mark); } .legend .del i { border-color: var(--mark-2); border-top-style: dashed; }
+.tl-line { fill: none; stroke: var(--data-line); stroke-width: 2px; stroke-linejoin: round; }
+.tl-area { fill: var(--mark-2); opacity: .14; }
+.cross { stroke: var(--line-strong); stroke-width: 1; stroke-dasharray: 3 3; }
+.cross-dot { fill: var(--bg); stroke: var(--data-line); stroke-width: 2px; }
+.spark { fill: none; stroke: var(--data-line); stroke-width: 1.5px; stroke-linejoin: round; }
+.empty { font: 13px var(--mono); color: var(--muted); padding: 22px 0; }
+
+.tip {
+  position: fixed; z-index: 10; pointer-events: none; min-width: 180px; max-width: 280px;
+  background: var(--bg); color: var(--ink); border: 1px solid var(--line-strong); border-radius: 10px;
+  box-shadow: var(--raise); padding: 10px 12px; font: 12px/1.55 var(--mono);
+  opacity: 0; transform: translateY(4px); transition: opacity .12s, transform .12s;
+}
+.tip.on { opacity: 1; transform: none; }
+.tip b { display: block; font-size: 13px; margin-bottom: 4px; }
+.tip .r { display: flex; justify-content: space-between; gap: 16px; }
+.tip .r span:first-child { color: var(--muted); }
+
+/* ---------- orgs ---------- */
+.orgs { display: grid; gap: 14px; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
+.org { border: 1px solid var(--line); border-radius: 10px; padding: 14px; display: grid; gap: 10px; }
+.org .h { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.org .h a { font: 700 14px var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.org dl { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 0; }
+.org dt { font-size: 11px; color: var(--muted); }
+.org dd { margin: 0; font: 600 14px var(--mono); font-variant-numeric: tabular-nums; }
+
+/* ---------- avatars ---------- */
+.av { width: 26px; height: 26px; border-radius: 50%; flex: none; border: 1px solid var(--line); object-fit: cover; background: var(--grid); }
+.av.ini { display: inline-grid; place-items: center; font: 700 10px var(--mono); color: var(--ink); }
+.org .av { width: 34px; height: 34px; border-radius: 8px; }
+
+/* ---------- table ---------- */
+.tbar { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+.search { position: relative; flex: 1 1 240px; max-width: 360px; }
+.search input {
+  width: 100%; font: 14px var(--mono); color: var(--ink); background: var(--bg);
+  border: 1px solid var(--line-strong); border-radius: 8px; padding: 10px 12px 10px 34px;
+}
+.search input::placeholder { color: var(--muted); }
+.search input:focus { outline: none; border-color: var(--focus); box-shadow: 0 0 0 1px var(--focus); }
+.search svg { position: absolute; left: 11px; top: 50%; transform: translateY(-50%); stroke: var(--muted); }
+.scroll { overflow-x: auto; margin: 0 -4px; padding: 0 4px; }
+table { width: 100%; border-collapse: collapse; font: 13px/1.4 var(--mono); font-variant-numeric: tabular-nums; }
+th { text-align: right; font-weight: 600; color: var(--muted); padding: 0; white-space: nowrap; border-bottom: 1px solid var(--line-strong); }
+th button { all: unset; cursor: pointer; display: block; padding: 8px 10px; text-align: inherit; }
+th button:hover { color: var(--ink); }
+th button:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; border-radius: 4px; }
+th[aria-sort] button { color: var(--ink); }
+th[aria-sort="descending"] button::after { content: " ↓"; color: var(--accent-text); }
+th[aria-sort="ascending"] button::after { content: " ↑"; color: var(--accent-text); }
+th.l, td.l { text-align: left; }
+td { padding: 9px 10px; text-align: right; border-bottom: 1px solid var(--line); white-space: nowrap; }
+tbody tr:hover td { background: var(--hover); }
+td.who a { display: inline-flex; align-items: center; gap: 10px; text-decoration: none; font-weight: 600; }
+td.who a:hover span { text-decoration: underline; text-decoration-color: var(--accent); }
+td.rank { color: var(--muted); width: 1%; }
+.share { display: inline-flex; align-items: center; gap: 8px; }
+.share i { display: inline-block; width: 64px; height: 6px; border-radius: 3px; border: 1px solid var(--line); position: relative; overflow: hidden; }
+.share i::after { content: ""; position: absolute; inset: 0 auto 0 0; width: var(--w); background: var(--mark); }
+.add-t { color: var(--ink); } .del-t { color: var(--muted); }
+
+footer { margin-top: 40px; padding-top: 18px; border-top: 1px solid var(--line); font: 12px/1.7 var(--sans); color: var(--muted); }
+footer ul { margin: 6px 0 12px; padding-left: 18px; }
+footer .sig { font-family: var(--mono); }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}
+@media print {
+  :root { --bg: #fff; --ink: #000; --muted: #6B7280; --surface: #fff; --raise: none; --mark: #000; --data-line: #000; }
+  body { background: #fff; font-size: 12px; } body::before { display: none; }
+  .tools, .seg, .tbar .search, .tip { display: none !important; }
+  .box { break-inside: avoid; animation: none; box-shadow: none; }
+  .scroll { overflow: visible; }
+  a { text-decoration: none; }
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div>
+      <div class="brand"><b>devstats</b><span>contribution report</span><span class="caret" aria-hidden="true"></span></div>
+      <h1 id="title">devstats report</h1>
+      <div class="meta" id="meta"></div>
+    </div>
+    <div class="tools">
+      <button class="btn" id="theme" type="button" aria-label="Switch color theme">◐ theme</button>
+      <button class="btn" type="button" onclick="window.print()" aria-label="Print or save as PDF">⎙ print</button>
+    </div>
+  </header>
+
+  <main>
+    <section class="box" aria-labelledby="h-over"><h2 id="h-over">overview</h2><div class="kpis" id="kpis"></div></section>
+
+    <section class="box" aria-labelledby="h-top">
+      <h2 id="h-top">top contributors<span class="count" id="top-count"></span></h2>
+      <div class="seg" role="group" aria-label="Rank by" id="metric"></div>
+      <div class="chart" id="bars"></div>
+    </section>
+
+    <div class="grid2">
+      <section class="box" aria-labelledby="h-churn">
+        <h2 id="h-churn">code churn</h2>
+        <div class="legend"><span class="add"><i></i>lines added →</span><span class="del"><i></i>← lines deleted</span></div>
+        <div class="chart" id="churn"></div>
+      </section>
+      <section class="box" aria-labelledby="h-time">
+        <h2 id="h-time">weekly commits</h2>
+        <div class="seg" role="group" aria-label="Time range" id="span"></div>
+        <div class="chart" id="timeline"></div>
+        <div class="foot" id="time-foot"></div>
+      </section>
+    </div>
+
+    <section class="box" aria-labelledby="h-orgs"><h2 id="h-orgs">organizations</h2><div class="orgs" id="orgs"></div></section>
+
+    <section class="box" aria-labelledby="h-all">
+      <h2 id="h-all">all contributors<span class="count" id="all-count"></span></h2>
+      <div class="tbar">
+        <label class="search"><span class="sr">Search contributors</span>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke-width="2.4" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+          <input id="q" type="search" placeholder="Search by login or org" autocomplete="off">
+        </label>
+        <span class="muted mono" id="shown" aria-live="polite"></span>
+      </div>
+      <div class="scroll"><table id="tbl"><thead></thead><tbody></tbody></table></div>
+      <div class="empty" id="none" hidden>No contributor matches that search. Try a shorter part of the login.</div>
+    </section>
+  </main>
+
+  <footer id="foot"></footer>
+</div>
+<div class="tip" id="tip" role="tooltip"></div>
+
+<script type="application/json" id="devstats-data">__DEVSTATS_DATA__</script>
+<script>
+(() => {
+  "use strict";
+  const D = JSON.parse(document.getElementById("devstats-data").textContent);
+  const $ = (id) => document.getElementById(id);
+  const NS = "http://www.w3.org/2000/svg";
+  const nf = new Intl.NumberFormat("en-US");
+  const cf = new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 });
+  const fmt = (n) => nf.format(n);
+  const short = (n) => (n < 10000 ? nf.format(n) : cf.format(n));
+  const safeUrl = (u) => (typeof u === "string" && /^https?:\/\//i.test(u) ? u : null);
+
+  /* el("div", {class: "x"}, child, "text") — text is always set as text, never HTML. */
+  function el(tag, attrs, ...kids) {
+    const n = document.createElement(tag);
+    for (const [k, v] of Object.entries(attrs || {})) {
+      if (v == null || v === false) continue;
+      if (k === "style") n.style.cssText = v; else n.setAttribute(k, v === true ? "" : v);
+    }
+    for (const k of kids) if (k != null) n.append(k.nodeType ? k : document.createTextNode(String(k)));
+    return n;
+  }
+  function svg(tag, attrs, ...kids) {
+    const n = document.createElementNS(NS, tag);
+    for (const [k, v] of Object.entries(attrs || {})) if (v != null) n.setAttribute(k, v);
+    for (const k of kids) if (k != null) n.append(k.nodeType ? k : document.createTextNode(String(k)));
+    return n;
+  }
+  function avatar(login, url, size) {
+    const initials = (login || "?").replace(/\[bot\]$/, "").slice(0, 2).toUpperCase();
+    const fallback = () => el("span", { class: "av ini", "aria-hidden": "true" }, initials);
+    const src = safeUrl(url);
+    if (!src) return fallback();
+    const img = el("img", { class: "av", alt: "", loading: "lazy", width: size, height: size,
+      src: src + (src.includes("?") ? "&" : "?") + "s=" + size * 2 });
+    img.addEventListener("error", () => img.replaceWith(fallback()), { once: true });
+    return img;
+  }
+
+  /* ---------- theme toggle: auto → light → dark (remembered per viewer) ---------- */
+  const root = document.documentElement;
+  const themes = ["auto", "light", "dark"];
+  let theme = "auto";
+  try { theme = localStorage.getItem("devstats-theme") || "auto"; } catch (_) {}
+  const applyTheme = () => {
+    if (theme === "auto") root.removeAttribute("data-theme"); else root.setAttribute("data-theme", theme);
+    $("theme").textContent = "◐ " + theme;
+  };
+  $("theme").addEventListener("click", () => {
+    theme = themes[(themes.indexOf(theme) + 1) % themes.length];
+    try { localStorage.setItem("devstats-theme", theme); } catch (_) {}
+    applyTheme();
+  });
+  applyTheme();
+
+  /* ---------- tooltip ---------- */
+  const tip = $("tip");
+  function showTip(evt, title, rows) {
+    tip.replaceChildren(el("b", null, title), ...rows.map(([k, v]) => el("div", { class: "r" }, el("span", null, k), el("span", null, v))));
+    tip.classList.add("on");
+    let x, y;
+    if (evt.clientX != null && evt.type !== "focus") { x = evt.clientX; y = evt.clientY; }
+    else { const r = evt.currentTarget.getBoundingClientRect(); x = r.left + 40; y = r.top; }
+    const w = tip.offsetWidth, h = tip.offsetHeight;
+    tip.style.left = Math.max(8, Math.min(x + 14, innerWidth - w - 8)) + "px";
+    tip.style.top = Math.max(8, Math.min(y + 14, innerHeight - h - 8)) + "px";
+  }
+  const hideTip = () => tip.classList.remove("on");
+  addEventListener("scroll", hideTip, { passive: true });
+  const personRows = (c) => [
+    ["commits", fmt(c.commits)], ["lines added", "+" + fmt(c.additions)], ["lines deleted", "−" + fmt(c.deletions)],
+    ["pull requests", fmt(c.prs) + " (" + fmt(c.prs_merged) + " merged)"], ["issues", fmt(c.issues)],
+    ["repositories", fmt(c.repos)], ["share of commits", c.share.toFixed(1) + "%"],
+  ];
+
+  /* ---------- header ---------- */
+  const orgNames = D.orgs.map((o) => o.login);
+  const h1 = $("title");
+  h1.replaceChildren();
+  orgNames.forEach((n, i) => { if (i) h1.append(el("span", { class: "sep" }, " · ")); h1.append(n); });
+  document.title = "devstats · " + orgNames.join(", ");
+  const r = D.range;
+  const rangeText = r.since && r.until ? r.since + " → " + r.until : r.since ? "since " + r.since : r.until ? "until " + r.until : "all time";
+  const gen = new Date(D.generated_at);
+  $("meta").append(
+    el("span", null, rangeText),
+    el("span", null, "generated " + (isNaN(gen) ? D.generated_at : gen.toISOString().slice(0, 16).replace("T", " ") + " UTC")),
+    el("span", null, "ranked by " + D.sort),
+  );
+
+  /* ---------- KPIs ---------- */
+  const T = D.totals;
+  const kpi = (v, unit, label) => el("div", { class: "kpi" }, el("div", { class: "v" }, v, unit ? el("small", null, unit) : null), el("div", { class: "l" }, label));
+  $("kpis").append(
+    kpi(fmt(T.contributors), "", "contributors"),
+    kpi(fmt(T.repos), "", T.repos_skipped ? "repositories (" + fmt(T.repos_skipped) + " skipped)" : "repositories"),
+    kpi(short(T.commits), "", "commits"),
+    kpi("+" + short(T.additions), "", "lines added · −" + short(T.deletions) + " deleted"),
+    kpi(fmt(T.prs), "", "pull requests · " + fmt(T.prs_merged) + " merged"),
+    kpi(fmt(T.issues), "", "issues opened"),
+  );
+
+  const C = D.contributors;
+  const shownNote = (n) => (n < T.contributors ? " top " + n + " of " + fmt(T.contributors) : " " + fmt(n));
+
+  /* ---------- top contributors: horizontal bars, one series ---------- */
+  const METRICS = [
+    ["commits", "commits", (c) => c.commits],
+    ["lines", "lines changed", (c) => c.additions + c.deletions],
+    ["prs", "pull requests", (c) => c.prs],
+    ["issues", "issues", (c) => c.issues],
+  ];
+  let metric = { commits: "commits", additions: "lines", deletions: "lines", lines: "lines", prs: "prs", issues: "issues" }[D.sort] || "commits";
+  function segmented(host, items, current, onPick) {
+    host.replaceChildren(...items.map(([key, label]) => {
+      const b = el("button", { type: "button", "aria-pressed": String(key === current) }, label);
+      b.addEventListener("click", () => {
+        for (const x of host.children) x.setAttribute("aria-pressed", String(x === b));
+        onPick(key);
+      });
+      return b;
+    }));
+  }
+  segmented($("metric"), METRICS.map(([k, l]) => [k, l]), metric, (k) => { metric = k; drawBars(); });
+
+  function drawBars() {
+    const host = $("bars");
+    const [, label, get] = METRICS.find((m) => m[0] === metric);
+    const list = C.slice().sort((a, b) => get(b) - get(a) || b.commits - a.commits).filter((c) => get(c) > 0).slice(0, 15);
+    $("top-count").textContent = list.length ? " by " + label : "";
+    if (!list.length) { host.replaceChildren(el("div", { class: "empty" }, "No " + label + " in this range.")); return; }
+    const W = Math.max(300, host.clientWidth || 600), rowH = 30, labelW = Math.min(170, W * 0.34), valW = 64;
+    const plotW = W - labelW - valW, max = get(list[0]) || 1;
+    const s = svg("svg", { width: W, height: list.length * rowH, role: "img", "aria-label": "Top contributors by " + label });
+    list.forEach((c, i) => {
+      const y = i * rowH, v = get(c), w = Math.max(2, (v / max) * plotW);
+      const g = svg("g", { class: "row", tabindex: "0", "aria-label": c.login + ": " + fmt(v) + " " + label });
+      g.append(
+        svg("rect", { class: "hit", x: 0, y, width: W, height: rowH }),
+        svg("text", { class: "lbl", x: labelW - 12, y: y + rowH / 2 + 4, "text-anchor": "end" }, c.login.length > 20 ? c.login.slice(0, 19) + "…" : c.login),
+        svg("rect", { class: "bar", x: labelW, y: y + 7, width: w, height: rowH - 14, rx: 3, style: "animation-delay:" + i * 30 + "ms" }),
+        svg("text", { class: "val", x: labelW + w + 8, y: y + rowH / 2 + 4 }, short(v)),
+      );
+      const show = (e) => showTip(e, c.login, personRows(c));
+      g.addEventListener("pointermove", show); g.addEventListener("focus", show);
+      g.addEventListener("pointerleave", hideTip); g.addEventListener("blur", hideTip);
+      s.append(g);
+    });
+    host.replaceChildren(s);
+  }
+
+  /* ---------- code churn: diverging lollipops (deletions ← 0 → additions) ---------- */
+  function drawChurn() {
+    const host = $("churn");
+    const list = C.filter((c) => c.additions + c.deletions > 0).sort((a, b) => b.additions + b.deletions - (a.additions + a.deletions)).slice(0, 12);
+    if (!list.length) { host.replaceChildren(el("div", { class: "empty" }, "No line changes in this range.")); return; }
+    const W = Math.max(300, host.clientWidth || 500), rowH = 28, labelW = Math.min(130, W * 0.3);
+    const plot = W - labelW - 8, mid = labelW + plot / 2, half = plot / 2 - 44;
+    const max = Math.max(...list.map((c) => Math.max(c.additions, c.deletions))) || 1;
+    const s = svg("svg", { width: W, height: list.length * rowH + 6, role: "img", "aria-label": "Lines added and deleted per contributor" });
+    s.append(svg("line", { class: "axis", x1: mid, x2: mid, y1: 0, y2: list.length * rowH + 6 }));
+    list.forEach((c, i) => {
+      const y = i * rowH + rowH / 2 + 3, a = (c.additions / max) * half, d = (c.deletions / max) * half;
+      const g = svg("g", { class: "row", tabindex: "0", "aria-label": c.login + ": +" + fmt(c.additions) + " / −" + fmt(c.deletions) + " lines" });
+      g.append(
+        svg("rect", { class: "hit", x: 0, y: y - rowH / 2, width: W, height: rowH }),
+        svg("text", { class: "lbl", x: labelW - 10, y: y + 4, "text-anchor": "end" }, c.login.length > 15 ? c.login.slice(0, 14) + "…" : c.login),
+        svg("line", { class: "lol-del", x1: mid, x2: mid - d, y1: y, y2: y, "stroke-dasharray": "4 3" }),
+        svg("circle", { class: "dot-del", cx: mid - d, cy: y, r: 4 }),
+        svg("line", { class: "lol-add", x1: mid, x2: mid + a, y1: y, y2: y }),
+        svg("circle", { class: "dot-add", cx: mid + a, cy: y, r: 4 }),
+      );
+      if (i < 3) { /* selective direct labels: the three largest only */
+        g.append(svg("text", { x: mid + a + 9, y: y + 4 }, "+" + short(c.additions)));
+        g.append(svg("text", { x: mid - d - 9, y: y + 4, "text-anchor": "end" }, "−" + short(c.deletions)));
+      }
+      const show = (e) => showTip(e, c.login, [["lines added", "+" + fmt(c.additions)], ["lines deleted", "−" + fmt(c.deletions)], ["net", (c.additions >= c.deletions ? "+" : "−") + fmt(Math.abs(c.additions - c.deletions))]]);
+      g.addEventListener("pointermove", show); g.addEventListener("focus", show);
+      g.addEventListener("pointerleave", hideTip); g.addEventListener("blur", hideTip);
+      s.append(g);
+    });
+    host.replaceChildren(s);
+  }
+
+  /* ---------- weekly commits: one line, crosshair tooltip ---------- */
+  let span = "52";
+  const weeksAll = D.weekly || [];
+  segmented($("span"), [["52", "52 weeks"], ["all", "whole range"]], span, (k) => { span = k; drawTimeline(); });
+  if (weeksAll.length <= 52) $("span").hidden = true;
+
+  function drawTimeline() {
+    const host = $("timeline");
+    const pts = span === "52" ? weeksAll.slice(-52) : weeksAll;
+    if (!pts.length) { host.replaceChildren(el("div", { class: "empty" }, "No commits in this range.")); $("time-foot").textContent = ""; return; }
+    const W = Math.max(300, host.clientWidth || 500), H = 220, pl = 40, pr = 10, pt = 10, pb = 26;
+    const max = Math.max(1, ...pts.map((p) => p.commits));
+    const nice = Math.pow(10, Math.floor(Math.log10(max))), top = Math.ceil(max / nice) * nice;
+    const x = (i) => pl + (pts.length === 1 ? 0 : (i / (pts.length - 1)) * (W - pl - pr));
+    const y = (v) => pt + (1 - v / top) * (H - pt - pb);
+    const s = svg("svg", { width: W, height: H, role: "img", "aria-label": "Commits per week" });
+    for (const t of [0, top / 2, top]) {
+      s.append(svg("line", { class: "gridline", x1: pl, x2: W - pr, y1: y(t), y2: y(t) }));
+      s.append(svg("text", { x: pl - 8, y: y(t) + 4, "text-anchor": "end" }, short(Math.round(t))));
+    }
+    const tickEvery = Math.max(1, Math.ceil(pts.length / Math.max(2, Math.floor((W - pl) / 90))));
+    pts.forEach((p, i) => {
+      if (i % tickEvery === 0) s.append(svg("text", { x: x(i), y: H - 6, "text-anchor": i === 0 ? "start" : "middle" }, span === "52" ? p.week.slice(5) : p.week.slice(0, 7)));
+    });
+    const path = pts.map((p, i) => (i ? "L" : "M") + x(i).toFixed(1) + " " + y(p.commits).toFixed(1)).join(" ");
+    s.append(svg("path", { class: "tl-area", d: path + " L" + x(pts.length - 1) + " " + y(0) + " L" + x(0) + " " + y(0) + " Z" }));
+    s.append(svg("path", { class: "tl-line", d: path }));
+    const cross = svg("line", { class: "cross", y1: pt, y2: H - pb, visibility: "hidden" });
+    const dot = svg("circle", { class: "cross-dot", r: 4.5, visibility: "hidden" });
+    const hit = svg("rect", { class: "hit", x: pl, y: 0, width: W - pl - pr, height: H, tabindex: "0", "aria-label": "Weekly commits chart; use left and right arrow keys to read weeks" });
+    s.append(cross, dot, hit);
+    let cur = pts.length - 1;
+    const point = (i, e) => {
+      cur = Math.max(0, Math.min(pts.length - 1, i));
+      const p = pts[cur];
+      cross.setAttribute("x1", x(cur)); cross.setAttribute("x2", x(cur));
+      dot.setAttribute("cx", x(cur)); dot.setAttribute("cy", y(p.commits));
+      cross.setAttribute("visibility", "visible"); dot.setAttribute("visibility", "visible");
+      showTip(e, "week of " + p.week, [["commits", fmt(p.commits)], ["lines added", "+" + fmt(p.additions)], ["lines deleted", "−" + fmt(p.deletions)]]);
+    };
+    hit.addEventListener("pointermove", (e) => {
+      const b = s.getBoundingClientRect();
+      point(Math.round(((e.clientX - b.left - pl) / (W - pl - pr)) * (pts.length - 1)), e);
+    });
+    hit.addEventListener("focus", (e) => point(cur, e));
+    hit.addEventListener("keydown", (e) => {
+      if (e.key === "ArrowLeft" || e.key === "ArrowRight") { e.preventDefault(); point(cur + (e.key === "ArrowRight" ? 1 : -1), { currentTarget: hit, type: "focus" }); }
+    });
+    const off = () => { hideTip(); cross.setAttribute("visibility", "hidden"); dot.setAttribute("visibility", "hidden"); };
+    hit.addEventListener("pointerleave", off); hit.addEventListener("blur", off);
+    host.replaceChildren(s);
+    const total = pts.reduce((a, p) => a + p.commits, 0), busiest = pts.reduce((a, p) => (p.commits > a.commits ? p : a), pts[0]);
+    $("time-foot").textContent = fmt(total) + " commits over " + pts.length + " weeks · busiest week " + busiest.week + " (" + fmt(busiest.commits) + ")";
+  }
+
+  /* ---------- organizations ---------- */
+  function sparkline(series, w, h) {
+    const s = svg("svg", { width: w, height: h, "aria-hidden": "true" });
+    if (!series.length) return s;
+    const max = Math.max(1, ...series);
+    const d = series.map((v, i) => (i ? "L" : "M") + ((i / Math.max(1, series.length - 1)) * (w - 2) + 1).toFixed(1) + " " + (h - 1 - (v / max) * (h - 2)).toFixed(1)).join(" ");
+    s.append(svg("path", { class: "spark", d }));
+    return s;
+  }
+  $("orgs").append(...D.orgs.map((o) => {
+    const href = safeUrl(o.html_url);
+    const name = href ? el("a", { href, rel: "noopener" }, o.login) : el("span", null, o.login);
+    const sub = o.name && o.name !== o.login ? el("div", { class: "muted", style: "font-size:12px" }, o.name) : null;
+    const t = o.totals;
+    return el("article", { class: "org" },
+      el("div", { class: "h" }, avatar(o.login, o.avatar_url, 34), el("div", { style: "min-width:0" }, name, sub)),
+      el("dl", null,
+        el("div", null, el("dt", null, "repos"), el("dd", null, fmt(t.repos))),
+        el("div", null, el("dt", null, "people"), el("dd", null, fmt(t.contributors))),
+        el("div", null, el("dt", null, "commits"), el("dd", null, short(t.commits))),
+        el("div", null, el("dt", null, "PRs"), el("dd", null, fmt(t.prs))),
+        el("div", null, el("dt", null, "issues"), el("dd", null, fmt(t.issues))),
+        el("div", null, el("dt", null, "lines"), el("dd", null, short(t.additions + t.deletions))),
+      ),
+      el("div", { class: "muted", style: "font-size:11px" }, "commits, last 52 weeks"),
+      sparkline((o.weekly || []).slice(-52).map((p) => p.commits), 240, 30),
+      o.incomplete_repos && o.incomplete_repos.length ? el("div", { class: "muted", style: "font-size:12px" }, "▲ stats still computing for " + o.incomplete_repos.length + " repo(s); run devstats again for complete numbers") : null,
+    );
+  }));
+
+  /* ---------- all contributors: sortable + searchable table ---------- */
+  const COLS = [
+    ["rank", "#", null, "rank"],
+    ["login", "contributor", (c) => c.login.toLowerCase(), "l"],
+    ["commits", "commits", (c) => c.commits],
+    ["additions", "+lines", (c) => c.additions],
+    ["deletions", "−lines", (c) => c.deletions],
+    ["prs", "PRs", (c) => c.prs],
+    ["prs_merged", "merged", (c) => c.prs_merged],
+    ["issues", "issues", (c) => c.issues],
+    ["repos", "repos", (c) => c.repos],
+    ["share", "share", (c) => c.share, "l"],
+    ["activity", "52 weeks", null, "l"],
+  ];
+  const rank = new Map(C.map((c, i) => [c, i + 1]));
+  let sortKey = null, sortDir = -1, query = "";
+  const thead = $("tbl").tHead, tbody = $("tbl").tBodies[0];
+  const hr = el("tr");
+  for (const [key, label, get, cls] of COLS) {
+    const th = el("th", { class: cls === "l" ? "l" : null, scope: "col" });
+    if (get) {
+      const b = el("button", { type: "button" }, label);
+      b.addEventListener("click", () => {
+        if (sortKey === key) sortDir = -sortDir; else { sortKey = key; sortDir = key === "login" ? 1 : -1; }
+        drawTable();
+      });
+      th.append(b);
+    } else th.append(el("span", { style: "display:block;padding:8px 10px" }, label));
+    th.dataset.key = key;
+    hr.append(th);
+  }
+  thead.append(hr);
+  $("q").addEventListener("input", (e) => { query = e.target.value.trim().toLowerCase(); drawTable(); });
+  $("all-count").textContent = shownNote(C.length);
+
+  function drawTable() {
+    for (const th of hr.children) {
+      if (th.dataset.key === sortKey) th.setAttribute("aria-sort", sortDir > 0 ? "ascending" : "descending");
+      else th.removeAttribute("aria-sort");
+    }
+    let rows = C.filter((c) => !query || c.login.toLowerCase().includes(query) || c.orgs.some((o) => o.toLowerCase().includes(query)));
+    if (sortKey) {
+      const get = COLS.find((c) => c[0] === sortKey)[2];
+      rows = rows.slice().sort((a, b) => { const x = get(a), y = get(b); return (x < y ? -1 : x > y ? 1 : 0) * sortDir; });
+    }
+    const maxShare = Math.max(1, ...C.map((c) => c.share));
+    tbody.replaceChildren(...rows.map((c) => {
+      const href = safeUrl(c.html_url);
+      const who = href ? el("a", { href, rel: "noopener", title: c.orgs.join(", ") }, avatar(c.login, c.avatar_url, 26), el("span", null, c.login))
+                       : el("span", null, c.login);
+      const share = el("span", { class: "share" }, el("i", { style: "--w:" + ((c.share / maxShare) * 100).toFixed(1) + "%" }), c.share.toFixed(1) + "%");
+      return el("tr", null,
+        el("td", { class: "rank" }, rank.get(c)),
+        el("td", { class: "l who" }, who),
+        el("td", null, fmt(c.commits)),
+        el("td", { class: "add-t" }, "+" + short(c.additions)),
+        el("td", { class: "del-t" }, "−" + short(c.deletions)),
+        el("td", null, fmt(c.prs)),
+        el("td", null, fmt(c.prs_merged)),
+        el("td", null, fmt(c.issues)),
+        el("td", null, fmt(c.repos)),
+        el("td", { class: "l" }, share),
+        el("td", { class: "l" }, sparkline(c.activity || [], 92, 20)),
+      );
+    }));
+    $("none").hidden = rows.length > 0;
+    $("shown").textContent = query ? rows.length + " of " + C.length + " shown" : "";
+  }
+
+  /* ---------- footer ---------- */
+  $("foot").append(
+    el("div", null, "How to read these numbers"),
+    el("ul", null, ...(D.notes || []).map((n) => el("li", null, n))),
+    el("div", { class: "sig" }, "generated by devstats " + D.version + (D.top ? " · top " + D.top + " contributors (devstats --top 0 lists everyone)" : "")),
+  );
+
+  const draw = () => { drawBars(); drawChurn(); drawTimeline(); };
+  drawTable(); draw();
+  let rt; addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(draw, 120); });
+})();
+</script>
+</body>
+</html>

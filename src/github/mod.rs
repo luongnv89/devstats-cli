@@ -1,6 +1,7 @@
 //! Minimal GitHub REST client: auth, `Link` pagination, rate-limit waits, retries.
 
 pub mod repos;
+pub mod search;
 pub mod stats;
 
 use std::io::Read;

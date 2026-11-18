@@ -11,26 +11,34 @@ pub mod style;
 pub mod ui;
 
 use std::io::Write;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::time::Duration;
 
 use chrono::Utc;
 use clap::{CommandFactory, FromArgMatches};
 
 use crate::cli::{Cli, Format};
 use crate::error::{AppError, Result};
-use crate::github::{repos, stats, Client, DEFAULT_API};
+use crate::github::{repos, search, stats, Client, DEFAULT_API};
 use crate::model::OrgData;
+use crate::style::{decide, Env, Mode, Stream};
 use crate::ui::Reporter;
 
 /// Parse arguments, run, and return the process exit code.
 pub fn run() -> i32 {
-    let matches = Cli::command().get_matches();
+    let matches = Cli::command()
+        .styles(style::theme::clap_styles())
+        .color(help_color())
+        .get_matches();
     let cli = match Cli::from_arg_matches(&matches) {
         Ok(c) => c,
         Err(e) => e.exit(),
     };
-    let ui = Arc::new(Reporter::new(cli.verbose, cli.quiet));
-    match execute(&cli, ui.clone()) {
+    let out_mode = decide(&Env::capture(Stream::Stdout), Stream::Stdout, cli.format != Format::Table, cli.no_color);
+    let err_mode = decide(&Env::capture(Stream::Stderr), Stream::Stderr, false, cli.no_color);
+    let ui = Arc::new(Reporter::new(err_mode, cli.verbose, cli.quiet));
+    match execute(&cli, ui.clone(), out_mode) {
         Ok(()) => 0,
         Err(e) => {
             ui.error(&e);
@@ -39,7 +47,21 @@ pub fn run() -> i32 {
     }
 }
 
-fn execute(cli: &Cli, ui: Arc<Reporter>) -> Result<()> {
+/// Color for clap's help and usage errors, decided before parsing: `--no-color` and
+/// NO_COLOR turn it off entirely, FORCE_COLOR forces it, otherwise clap checks the TTY.
+fn help_color() -> clap::ColorChoice {
+    let set = |k: &str| std::env::var(k).ok().filter(|v| !v.is_empty());
+    let no_color_flag = std::env::args_os().take_while(|a| a != "--").any(|a| a == "--no-color");
+    if no_color_flag || set("NO_COLOR").is_some() || set("TERM").as_deref() == Some("dumb") {
+        clap::ColorChoice::Never
+    } else if set("FORCE_COLOR").is_some_and(|v| v != "0") {
+        clap::ColorChoice::Always
+    } else {
+        clap::ColorChoice::Auto
+    }
+}
+
+fn execute(cli: &Cli, ui: Arc<Reporter>, out_mode: Mode) -> Result<()> {
     if let (Some(s), Some(u)) = (cli.since, cli.until) {
         if s > u {
             return Err(AppError::usage(format!("--since {s} is after --until {u}")).hint("swap the two dates"));
@@ -59,12 +81,28 @@ fn execute(cli: &Cli, ui: Arc<Reporter>) -> Result<()> {
     }
     let client = Client::new(&api, token.map(|(t, _)| t), ui.clone());
 
-    let mut data = Vec::new();
-    for login in &logins {
-        if let Some(d) = collect_org(&client, login, cli)? {
-            data.push(d);
-        }
-    }
+    // Keep the progress line's clock moving during long waits.
+    let running = AtomicBool::new(true);
+    let data = std::thread::scope(|s| {
+        s.spawn(|| {
+            while running.load(Ordering::SeqCst) {
+                std::thread::sleep(Duration::from_millis(250));
+                ui.tick();
+            }
+        });
+        let result = (|| {
+            let mut data = Vec::new();
+            for login in &logins {
+                if let Some(d) = collect_org(&client, login, cli)? {
+                    data.push(d);
+                }
+            }
+            Ok::<_, AppError>(data)
+        })();
+        running.store(false, Ordering::SeqCst);
+        result
+    })?;
+    ui.clear();
     if data.is_empty() {
         return Err(AppError::input("none of the given organizations exist on GitHub")
             .hint("check the spelling, e.g. https://github.com/Montimage"));
@@ -82,13 +120,20 @@ fn execute(cli: &Cli, ui: Arc<Reporter>) -> Result<()> {
 
     let text = match cli.format {
         Format::Json => output::json::render(&report),
-        Format::Tsv | Format::Table => output::tsv::render(&report),
+        Format::Tsv => output::tsv::render(&report),
+        Format::Table if out_mode.styled => output::table::render(&report, &out_mode, cli.per_org),
+        Format::Table => output::tsv::render(&report),
     };
+    if let Some(path) = &cli.html {
+        output::html::write(&report, path)?;
+        ui.info(&format!("wrote {}", path.display()));
+    }
     write_stdout(&text)
 }
 
 /// Fetch everything for one org. `Ok(None)` (after a warning) when it does not exist.
 fn collect_org(client: &Client, login: &str, cli: &Cli) -> Result<Option<OrgData>> {
+    client.ui.progress(login, 0, None);
     let Some(owner) = repos::owner(client, login)? else {
         client.ui.warn(&format!("'{login}' was not found on GitHub; skipping it"));
         return Ok(None);
@@ -102,12 +147,29 @@ fn collect_org(client: &Client, login: &str, cli: &Cli) -> Result<Option<OrgData
         .map(|r| r.name)
         .collect();
     client.ui.debug(&format!("{}: {} of {total} repos to scan", owner.login, scanned.len()));
-    let repo_stats = stats::fetch_all(client, &owner.login, &scanned, cli.jobs as usize, &|_| {})?;
+    client.ui.progress(&owner.login, 0, Some(scanned.len()));
+
+    let from = cli.since.unwrap_or_else(search::epoch);
+    let to = cli.until.unwrap_or_else(|| Utc::now().date_naive());
+    // Search (rate-limited to 30/min) runs beside the stats workers.
+    let (repo_stats, items) = std::thread::scope(|s| {
+        let search = s.spawn(|| -> Result<Vec<model::Item>> {
+            let mut items = search::fetch(client, &owner.login, owner.is_org, true, from, to)?;
+            items.extend(search::fetch(client, &owner.login, owner.is_org, false, from, to)?);
+            Ok(items)
+        });
+        let on_done = |n: usize| client.ui.progress(&owner.login, n, Some(scanned.len()));
+        let st = stats::fetch_all(client, &owner.login, &scanned, cli.jobs as usize, &on_done);
+        if !search.is_finished() {
+            client.ui.progress_note(&owner.login, "counting pull requests and issues");
+        }
+        (st, search.join().unwrap_or_else(|_| Err(AppError::runtime("search worker crashed"))))
+    });
     Ok(Some(OrgData {
         repos_skipped: total - scanned.len(),
         repos_scanned: scanned,
-        stats: repo_stats,
-        items: Vec::new(),
+        stats: repo_stats?,
+        items: items?,
         owner,
     }))
 }
