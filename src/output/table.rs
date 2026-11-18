@@ -196,15 +196,11 @@ fn summary_parts(r: &Report, mode: &Mode) -> (String, Vec<Line>, String) {
         .collect();
     let names: Vec<String> = r.org_names().iter().map(|o| sanitize(o, false)).collect();
     let title = format!("devstats{}{}", sep(mode), names.join(", "));
-    let mut footer = format!(
-        "{}{}{}",
-        &r.generated_at[..10.min(r.generated_at.len())],
-        sep(mode),
-        range_label(r, mode)
-    );
+    let date = &r.generated_at[..10.min(r.generated_at.len())];
+    let mut rest = range_label(r, mode);
     let incomplete: usize = r.orgs.iter().map(|o| o.incomplete_repos.len()).sum();
     if incomplete > 0 {
-        footer.push_str(&format!("{}{incomplete} repos still computing", sep(mode)));
+        rest.push_str(&format!("{}{incomplete} repos still computing", sep(mode)));
     }
     let public_only: Vec<String> = r
         .orgs
@@ -212,16 +208,42 @@ fn summary_parts(r: &Report, mode: &Mode) -> (String, Vec<Line>, String) {
         .filter(|o| o.private_access != PrivateAccess::Included)
         .map(|o| sanitize(&o.login, false))
         .collect();
-    if public_only.len() == r.orgs.len() && !public_only.is_empty() {
-        footer.push_str(&format!("{}public repos only", sep(mode)));
+    let footer = if public_only.len() == r.orgs.len() && !public_only.is_empty() {
+        format!("{date}{}{rest}{}public repos only", sep(mode), sep(mode))
     } else if !public_only.is_empty() {
-        footer.push_str(&format!(
-            "{}private repos not included for {}",
-            sep(mode),
-            public_only.join(", ")
-        ));
-    }
+        disclosure_footer(mode, date, &rest, &public_only, r.orgs.len())
+    } else {
+        format!("{date}{}{rest}", sep(mode))
+    };
     (title, items, footer)
+}
+
+/// The summary footer when some (not all) orgs are scanned without private repos.
+/// The box truncates its footer to the terminal width minus 6, so the disclosure must
+/// stay visible: name the orgs if that fits, else count them, then drop the date, and
+/// as a last resort put the disclosure first.
+fn disclosure_footer(
+    mode: &Mode,
+    date: &str,
+    rest: &str,
+    public_only: &[String],
+    orgs: usize,
+) -> String {
+    let max = mode.width.saturating_sub(6);
+    let s = sep(mode);
+    let named = format!("private repos not included for {}", public_only.join(", "));
+    let counted = format!(
+        "private repos not included for {} of {orgs} orgs",
+        public_only.len()
+    );
+    [
+        format!("{date}{s}{rest}{s}{named}"),
+        format!("{date}{s}{rest}{s}{counted}"),
+        format!("{rest}{s}{counted}"),
+    ]
+    .into_iter()
+    .find(|f| width(f) <= max)
+    .unwrap_or_else(|| format!("{counted}{s}{rest}"))
 }
 
 fn join((v, u): (String, &'static str)) -> String {
@@ -310,6 +332,9 @@ fn contributor_lines(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::cli::SortKey;
+    use crate::model::{OrgReport, Range, Totals};
+    use crate::style::{Glyphs, Tier};
 
     #[test]
     fn number_formats() {
@@ -319,5 +344,83 @@ mod tests {
         assert_eq!(compact(412_889), ("412.9".into(), "K"));
         assert_eq!(compact(1_920_000), ("1.92".into(), "M"));
         assert_eq!(compact(999_960), ("1.00".into(), "M"));
+    }
+
+    fn org(login: &str, access: PrivateAccess) -> OrgReport {
+        OrgReport {
+            login: login.into(),
+            name: None,
+            kind: "Organization",
+            avatar_url: String::new(),
+            html_url: String::new(),
+            totals: Totals::default(),
+            private_repos: 0,
+            private_access: access,
+            incomplete_repos: vec![],
+            contributors: vec![],
+            weekly: vec![],
+        }
+    }
+
+    fn report(orgs: Vec<OrgReport>) -> Report {
+        Report {
+            tool: "devstats",
+            version: "0",
+            generated_at: "2026-11-18T10:00:00Z".into(),
+            range: Range {
+                since: Some("2025-01-01".into()),
+                until: Some("2025-12-31".into()),
+                activity_from: "2025-01-05".into(),
+            },
+            sort: SortKey::Commits,
+            top: 0,
+            totals: Totals::default(),
+            orgs,
+            contributors: vec![],
+            weekly: vec![],
+            notes: vec![],
+        }
+    }
+
+    fn footer_line(out: &str) -> &str {
+        out.lines().find(|l| l.starts_with("╰")).unwrap()
+    }
+
+    #[test]
+    fn private_disclosure_survives_a_narrow_terminal() {
+        use PrivateAccess::*;
+        let mode = Mode::styled(Tier::None, Glyphs::Unicode, 80);
+        let r = report(vec![
+            org("acme-platform-engineering", Included),
+            org("acme-security-research", ListingFailed),
+        ]);
+        let out = render(&r, &mode, false);
+        let footer = footer_line(&out);
+        assert!(width(footer) <= 80, "{out}");
+        assert!(!footer.contains('…'), "{footer}");
+        assert!(
+            footer.contains("private repos not included for 1 of 2 orgs"),
+            "{footer}"
+        );
+        assert!(footer.contains("2025-01-01 → 2025-12-31"), "{footer}");
+
+        let mut r = r;
+        r.orgs[0].incomplete_repos = vec!["a".into(), "b".into()];
+        let out = render(&r, &mode, false);
+        let footer = footer_line(&out);
+        assert!(
+            footer.contains("private repos not included for 1 of 2 orgs"),
+            "{footer}"
+        );
+
+        let wide = Mode::styled(Tier::None, Glyphs::Unicode, 200);
+        let out = render(&r, &wide, false);
+        assert!(
+            footer_line(&out).contains(
+                "2026-11-18 · 2025-01-01 → 2025-12-31 · 2 repos still computing · \
+                 private repos not included for acme-security-research"
+            ),
+            "{out}"
+        );
     }
 }
