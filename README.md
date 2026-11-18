@@ -2,22 +2,8 @@
 
 Contribution stats for every contributor across one or more GitHub organizations:
 commits, lines added and deleted, pull requests, and issues, ranked in a btop-style
-terminal table or written to a single self-contained HTML report.
-
-```text
-╭─┐devstats · Montimage, montimage-projects┌──────────────────────────────────────────────────────╮
-│ 2 orgs   69 repos   57 contributors   6,206 commits   +22.78M / −12.24M lines                    │
-│ 1,474 PRs (1,413 merged)   1,638 issues                                                         │
-╰─┘2026-11-18 · last 1 year (since 2025-11-18)└───────────────────────────────────────────────────╯
-╭─┐contributors · top 5 by commits┌──────────────────────────────────────────────────────────────╮
-│ #  contributor    commits  +lines  −lines    PRs  merged  issues  repos  share                    │
-│ 1  luongnv89        2,541   2.87M   2.37M  1,366   1,324   1,580     26  ■■■■······  41%          │
-│ 2  nhnghia          1,666   6.57M   3.00M     41      37      12     25  ■■■·······  27%          │
-│ 3  strongcourage      706   4.15M  641.1K     10      10       1     11  ■·········  11%          │
-│ 4  JeevanPokhrel      300  336.6K   22.6K      0       0       0      2  ··········   5%          │
-│ 5  dev-montimage      240  183.0K   46.9K     12      12      13      5  ··········   4%          │
-╰─┘57 contributors · sorted by commits · --top 0 shows all└────────────────────────────────────────╯
-```
+terminal table or written to a single self-contained HTML report. See [Examples](#examples)
+for real runs against the `openai` and `anthropics` organizations.
 
 ## Install
 
@@ -39,13 +25,13 @@ Prebuilt binaries for Linux, macOS, and Windows are attached to each tagged GitH
 ## Usage
 
 ```bash
-devstats https://github.com/Montimage
-devstats https://github.com/Montimage https://github.com/montimage-projects --top 10 --sort lines
-devstats Montimage --period 6m --html report.html
-devstats Montimage --period all
-devstats Montimage --since 2025-01-01 --until 2025-06-30
-devstats Montimage montimage-projects --format json | jq '.contributors[0]'
-devstats Montimage --format tsv --top 0 > contributors.tsv
+devstats https://github.com/openai
+devstats https://github.com/openai https://github.com/anthropics --top 10 --sort lines
+devstats anthropics --period 6m --html report.html
+devstats anthropics --period all
+devstats openai --since 2025-01-01 --until 2025-06-30
+devstats openai anthropics --format json | jq '.contributors[0]'
+devstats anthropics --format tsv --top 0 > contributors.tsv
 ```
 
 Organizations can be given as `https://github.com/NAME`, `github.com/NAME`, or `NAME`.
