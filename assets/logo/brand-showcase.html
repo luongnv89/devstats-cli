@@ -1,0 +1,245 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>devstats Brand Identity</title>
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0A0A0A; --surface: #111111; --border: #262626; --muted: #A1A1A1; --text: #FAFAFA;
+    --green: #77CA9B; --cyan: #56C8E8; --green-l: #2E8A57; --cyan-l: #1A7FA3;
+    --light: #FAFAFA; --ink: #0A0A0A; --line-l: #E5E5E5;
+    --sans: Inter, system-ui, -apple-system, "Segoe UI", sans-serif;
+    --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--light); color: var(--ink); font: 400 16px/1.6 var(--sans); -webkit-font-smoothing: antialiased; }
+  .wrap { max-width: 1100px; margin: 0 auto; padding: 0 24px; }
+  section { padding: 88px 0; }
+  .label { font: 600 12px/1 var(--sans); letter-spacing: .14em; text-transform: uppercase; color: var(--green-l); margin-bottom: 16px; }
+  .dark .label { color: var(--green); }
+  h2 { font: 700 34px/1.2 var(--sans); letter-spacing: -.02em; margin-bottom: 16px; }
+  .lede { color: #525252; max-width: 640px; }
+  .dark { background: var(--bg); color: var(--text); }
+  .dark .lede { color: var(--muted); }
+
+  /* hero */
+  .hero { text-align: center; padding: 120px 0 104px; border-bottom: 1px solid var(--border); }
+  .hero svg { width: 152px; height: 152px; filter: drop-shadow(0 0 28px rgba(119,202,155,.28)); }
+  .hero .label { margin: 36px 0 14px; }
+  .hero h1 { font: 700 64px/1 var(--mono); letter-spacing: -.04em; }
+  .hero p { color: var(--muted); margin-top: 18px; font-size: 18px; }
+
+  /* concept */
+  .concept { display: grid; grid-template-columns: 1fr 1fr; gap: 56px; align-items: center; }
+  .annot { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 28px; }
+  .annot svg { width: 100%; height: auto; display: block; }
+  .annot text { font: 500 11px var(--sans); fill: var(--muted); }
+  .prose p { margin-bottom: 14px; color: #404040; }
+  .prose strong { color: var(--ink); }
+
+  /* variants */
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: 40px; }
+  .card { position: relative; border-radius: 16px; min-height: 220px; display: flex; align-items: center; justify-content: center; padding: 56px 32px 48px; transition: transform .2s ease; }
+  .card:hover { transform: translateY(-3px); }
+  .card.l { background: #fff; border: 1px solid var(--line-l); box-shadow: 0 1px 2px rgba(0,0,0,.04), 0 8px 24px rgba(0,0,0,.05); }
+  .card.d { background: var(--bg); border: 1px solid var(--border); color: var(--text); }
+  .card.wide { grid-column: span 2; }
+  .card.a { background: #fff; border: 1px solid var(--line-l); box-shadow: 0 1px 2px rgba(0,0,0,.04), 0 8px 24px rgba(0,0,0,.05); }
+  @media (prefers-color-scheme: dark) { .card.a { background: var(--bg); border-color: var(--border); box-shadow: none; } .card.a .tag, .card.a .file, .card.a .cap { color: var(--muted); } }
+  .card .tag { position: absolute; top: 18px; left: 20px; font: 600 11px/1 var(--sans); letter-spacing: .12em; text-transform: uppercase; color: #737373; }
+  .card.d .tag { color: var(--muted); }
+  .card .file { position: absolute; bottom: 16px; right: 20px; font: 400 12px/1 var(--mono); color: #737373; }
+  .card.d .file { color: var(--muted); }
+  .card img { display: block; max-width: 100%; height: auto; }
+  .concept > *, .grid > *, .specimen > *, .dev > *, .chips > * { min-width: 0; }
+  .card .cap { position: absolute; bottom: 16px; left: 20px; font: 400 12px/1 var(--mono); color: var(--muted); }
+
+  /* palette */
+  .chips { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-top: 40px; }
+  .chip { border: 1px solid var(--border); border-radius: 14px; overflow: hidden; background: var(--surface); }
+  .sw { height: 112px; display: flex; align-items: flex-end; padding: 12px 14px; font: 700 13px/1 var(--mono); }
+  .chip .meta { padding: 14px; }
+  .chip .meta b { display: block; font-weight: 600; font-size: 14px; }
+  .chip .meta span { color: var(--muted); font-size: 13px; line-height: 1.45; display: block; margin-top: 4px; }
+
+  /* type */
+  .specimen { margin-top: 40px; display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  .spec { background: #fff; border: 1px solid var(--line-l); border-radius: 16px; padding: 32px; box-shadow: 0 1px 2px rgba(0,0,0,.04); }
+  .spec .name { font: 600 12px/1 var(--sans); letter-spacing: .12em; text-transform: uppercase; color: #737373; margin-bottom: 20px; }
+  .spec .big { font: 700 56px/1 var(--mono); letter-spacing: -.04em; }
+  .spec .alpha { font: 400 15px/1.7 var(--mono); color: #404040; margin-top: 20px; word-break: break-all; }
+  .spec .h { font: 700 28px/1.2 var(--sans); letter-spacing: -.02em; }
+  .spec .b { font: 400 16px/1.6 var(--sans); color: #404040; margin-top: 12px; }
+
+  /* dev */
+  .dev { display: grid; grid-template-columns: 1.2fr 1fr; gap: 20px; margin-top: 40px; }
+  pre { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 24px; font: 400 13px/1.7 var(--mono); color: var(--text); overflow-x: auto; }
+  .k { color: var(--cyan); } .s { color: var(--green); } .c { color: #6B6B6B; }
+
+  footer { border-top: 1px solid var(--border); padding: 36px 0; color: var(--muted); font-size: 14px; }
+  footer .wrap { display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+  footer b { font-family: var(--mono); color: var(--text); }
+
+  @media (max-width: 760px) {
+    section { padding: 64px 0; }
+    .wrap { padding: 0 16px; }
+    .concept, .grid, .specimen, .dev { grid-template-columns: 1fr; }
+    .card.wide { grid-column: auto; }
+    .chips { grid-template-columns: 1fr 1fr; }
+    .hero h1 { font-size: 48px; }
+    h2 { font-size: 28px; }
+  }
+</style>
+</head>
+<body>
+
+<header class="hero dark">
+  <div class="wrap">
+    <svg viewBox="0 0 64 64" aria-label="devstats mark" role="img">
+      <path d="M15.5,8a4.5,4.5 0 1,0 9,0a4.5,4.5 0 1,0 -9,0ZM27.5,8a4.5,4.5 0 1,0 9,0a4.5,4.5 0 1,0 -9,0ZM15.5,20a4.5,4.5 0 1,0 9,0a4.5,4.5 0 1,0 -9,0ZM27.5,20a4.5,4.5 0 1,0 9,0a4.5,4.5 0 1,0 -9,0ZM27.5,44a4.5,4.5 0 1,0 9,0a4.5,4.5 0 1,0 -9,0Z" fill="#FAFAFA" fill-opacity=".12"/>
+      <path d="M39.5,20a4.5,4.5 0 1,0 9,0a4.5,4.5 0 1,0 -9,0ZM15.5,32a4.5,4.5 0 1,0 9,0a4.5,4.5 0 1,0 -9,0ZM27.5,32a4.5,4.5 0 1,0 9,0a4.5,4.5 0 1,0 -9,0ZM39.5,32a4.5,4.5 0 1,0 9,0a4.5,4.5 0 1,0 -9,0ZM15.5,44a4.5,4.5 0 1,0 9,0a4.5,4.5 0 1,0 -9,0ZM39.5,44a4.5,4.5 0 1,0 9,0a4.5,4.5 0 1,0 -9,0ZM15.5,56a4.5,4.5 0 1,0 9,0a4.5,4.5 0 1,0 -9,0ZM27.5,56a4.5,4.5 0 1,0 9,0a4.5,4.5 0 1,0 -9,0ZM39.5,56a4.5,4.5 0 1,0 9,0a4.5,4.5 0 1,0 -9,0Z" fill="#77CA9B"/>
+      <path d="M39.5,8a4.5,4.5 0 1,0 9,0a4.5,4.5 0 1,0 -9,0Z" fill="#56C8E8"/>
+    </svg>
+    <div class="label">Brand Identity</div>
+    <h1>devstats</h1>
+    <p>Every contributor, ranked. A "d" drawn in activity dots.</p>
+  </div>
+</header>
+
+<section>
+  <div class="wrap concept">
+    <div class="annot">
+      <svg viewBox="0 0 340 214" role="img" aria-label="Annotated devstats mark">
+        <g transform="translate(18,14) scale(3)">
+          <path d="M15.5,8a4.5,4.5 0 1,0 9,0a4.5,4.5 0 1,0 -9,0ZM27.5,8a4.5,4.5 0 1,0 9,0a4.5,4.5 0 1,0 -9,0ZM15.5,20a4.5,4.5 0 1,0 9,0a4.5,4.5 0 1,0 -9,0ZM27.5,20a4.5,4.5 0 1,0 9,0a4.5,4.5 0 1,0 -9,0ZM27.5,44a4.5,4.5 0 1,0 9,0a4.5,4.5 0 1,0 -9,0Z" fill="#FAFAFA" fill-opacity=".12"/>
+          <path d="M39.5,20a4.5,4.5 0 1,0 9,0a4.5,4.5 0 1,0 -9,0ZM15.5,32a4.5,4.5 0 1,0 9,0a4.5,4.5 0 1,0 -9,0ZM27.5,32a4.5,4.5 0 1,0 9,0a4.5,4.5 0 1,0 -9,0ZM39.5,32a4.5,4.5 0 1,0 9,0a4.5,4.5 0 1,0 -9,0ZM15.5,44a4.5,4.5 0 1,0 9,0a4.5,4.5 0 1,0 -9,0ZM39.5,44a4.5,4.5 0 1,0 9,0a4.5,4.5 0 1,0 -9,0ZM15.5,56a4.5,4.5 0 1,0 9,0a4.5,4.5 0 1,0 -9,0ZM27.5,56a4.5,4.5 0 1,0 9,0a4.5,4.5 0 1,0 -9,0ZM39.5,56a4.5,4.5 0 1,0 9,0a4.5,4.5 0 1,0 -9,0Z" fill="#77CA9B"/>
+          <path d="M39.5,8a4.5,4.5 0 1,0 9,0a4.5,4.5 0 1,0 -9,0Z" fill="#56C8E8"/>
+        </g>
+        <g stroke="#525252" stroke-width="1" fill="none">
+          <path d="M168,38 H200"/><path d="M168,74 H200"/><path d="M168,110 H200"/><path d="M114,161 V166 H200"/>
+        </g>
+        <text x="206" y="42">Leader: top value</text>
+        <text x="206" y="78">Stem: the "d" ascender</text>
+        <text x="206" y="114">Lit cell: a week of work</text>
+        <text x="206" y="170">Empty cell: no activity</text>
+      </svg>
+    </div>
+    <div class="prose">
+      <div class="label">Design Concept</div>
+      <h2>A monogram made of data</h2>
+      <p>The mark is a lowercase <strong>d</strong> built on a 3&times;5 dot grid, the same cell language as the 52-week activity graph devstats draws in the terminal. Lit cells form the letter; dim cells show where nothing happened.</p>
+      <p>The top of the stem is the one <strong>cyan</strong> dot. In the CLI, cyan marks the highest value in each column, so here it stands for the leader of the ranking. Everything else uses the theme's <strong>green</strong>.</p>
+      <p>The wordmark is set in <strong>JetBrains Mono Bold</strong>, tracked 4% tighter and converted to outlines. A monospace face matches the command people type.</p>
+    </div>
+  </div>
+</section>
+
+<section class="dark">
+  <div class="wrap">
+    <div class="label">Logo Variants</div>
+    <h2>Seven files, one geometry</h2>
+    <p class="lede">Every variant except the pixel-snapped favicon reuses the same path data from <code>logo-mark.svg</code>. Only color, scale and the wordmark change. Adaptive cards follow your system light/dark setting, as the files themselves do.</p>
+    <div class="grid">
+      <div class="card a wide"><span class="tag">Primary lockup &middot; adaptive</span><img src="logo-full.svg" alt="devstats logo" width="480" height="108"><span class="file">logo-full.svg</span></div>
+      <div class="card d wide"><span class="tag">Reversed (white)</span><img src="logo-white.svg" alt="devstats logo in white" width="480" height="108"><span class="file">logo-white.svg</span></div>
+      <div class="card a"><span class="tag">Mark &middot; adaptive</span><img src="logo-mark.svg" alt="devstats mark" width="128" height="128"><span class="file">logo-mark.svg</span></div>
+      <div class="card l"><span class="tag">App icon</span><img src="logo-icon.svg" alt="devstats app icon" width="148" height="148"><span class="file">logo-icon.svg</span></div>
+      <div class="card a"><span class="tag">Wordmark &middot; adaptive</span><img src="logo-wordmark.svg" alt="devstats wordmark" width="270" height="60"><span class="file">logo-wordmark.svg</span></div>
+      <div class="card a"><span class="tag">Favicon &middot; adaptive</span><img src="favicon.svg" alt="devstats favicon" width="64" height="64"><span class="cap">16&times;16px</span><span class="file">favicon.svg</span></div>
+      <div class="card l wide"><span class="tag">Monochrome (black)</span><img src="logo-black.svg" alt="devstats logo in black" width="480" height="108"><span class="file">logo-black.svg</span></div>
+    </div>
+  </div>
+</section>
+
+<section class="dark" style="border-top:1px solid var(--border)">
+  <div class="wrap">
+    <div class="label">Color Palette</div>
+    <h2>Taken from the terminal</h2>
+    <p class="lede">Green and cyan come straight from the CLI theme. On light backgrounds, deeper tones keep at least 4:1 contrast.</p>
+    <div class="chips">
+      <div class="chip"><div class="sw" style="background:#77CA9B;color:#0A0A0A">#77CA9B</div><div class="meta"><b>Activity Green</b><span>Primary. Lit cells on dark (10.1:1 on #0A0A0A)</span></div></div>
+      <div class="chip"><div class="sw" style="background:#56C8E8;color:#0A0A0A">#56C8E8</div><div class="meta"><b>Leader Cyan</b><span>Accent. The top value, highlights and links</span></div></div>
+      <div class="chip"><div class="sw" style="background:#2E8A57;color:#FAFAFA">#2E8A57</div><div class="meta"><b>Green Deep</b><span>Primary on light backgrounds (4.1:1)</span></div></div>
+      <div class="chip"><div class="sw" style="background:#1A7FA3;color:#FAFAFA">#1A7FA3</div><div class="meta"><b>Cyan Deep</b><span>Accent on light backgrounds (4.4:1)</span></div></div>
+      <div class="chip"><div class="sw" style="background:#0A0A0A;color:#FAFAFA;box-shadow:inset 0 -1px 0 #262626">#0A0A0A</div><div class="meta"><b>Background</b><span>Dark base, icon plate</span></div></div>
+      <div class="chip"><div class="sw" style="background:#111111;color:#FAFAFA">#111111</div><div class="meta"><b>Surface</b><span>Cards and elevated panels</span></div></div>
+      <div class="chip"><div class="sw" style="background:#262626;color:#FAFAFA">#262626</div><div class="meta"><b>Border</b><span>Dividers, icon edge</span></div></div>
+      <div class="chip"><div class="sw" style="background:#FAFAFA;color:#0A0A0A">#FAFAFA</div><div class="meta"><b>Text / Light</b><span>Text on dark, light background. Muted text: #A1A1A1</span></div></div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <div class="label">Typography</div>
+    <h2>Mono for the name, Inter for the rest</h2>
+    <div class="specimen">
+      <div class="spec">
+        <div class="name">JetBrains Mono Bold &middot; Wordmark</div>
+        <div class="big">devstats</div>
+        <div class="alpha">abcdefghijklmnopqrstuvwxyz<br>0123456789 --period 1y --format html</div>
+      </div>
+      <div class="spec">
+        <div class="name">Inter &middot; Interface &amp; docs</div>
+        <div class="h">Rank every contributor across your GitHub organizations</div>
+        <div class="b">Inter Regular for body copy. Commits, lines, pull requests and issues per person, as a ranked terminal table, JSON, TSV or an offline HTML report.</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="dark">
+  <div class="wrap">
+    <div class="label">Developer Reference</div>
+    <h2>Drop-in values</h2>
+    <div class="dev">
+<pre><span class="c">// tailwind.config.js</span>
+theme: {
+  extend: {
+    colors: {
+      brand: {
+        <span class="k">primary</span>:     <span class="s">'#77CA9B'</span>,
+        <span class="k">accent</span>:      <span class="s">'#56C8E8'</span>,
+        <span class="k">primaryDeep</span>: <span class="s">'#2E8A57'</span>,
+        <span class="k">accentDeep</span>:  <span class="s">'#1A7FA3'</span>,
+        <span class="k">bg</span>:          <span class="s">'#0A0A0A'</span>,
+        <span class="k">surface</span>:     <span class="s">'#111111'</span>,
+        <span class="k">border</span>:      <span class="s">'#262626'</span>,
+        <span class="k">muted</span>:       <span class="s">'#A1A1A1'</span>,
+        <span class="k">text</span>:        <span class="s">'#FAFAFA'</span>,
+      },
+    },
+    fontFamily: {
+      <span class="k">mono</span>: [<span class="s">'JetBrains Mono'</span>, <span class="s">'ui-monospace'</span>],
+      <span class="k">sans</span>: [<span class="s">'Inter'</span>, <span class="s">'system-ui'</span>],
+    },
+  },
+}</pre>
+<pre>assets/logo/
+├── <span class="s">logo-mark.svg</span>      <span class="c"># 64×64 canonical mark</span>
+├── <span class="s">logo-full.svg</span>      <span class="c"># 320×72 mark + wordmark</span>
+├── <span class="s">logo-wordmark.svg</span>  <span class="c"># 180×40 text only</span>
+├── <span class="s">logo-icon.svg</span>      <span class="c"># 512×512 app icon</span>
+├── <span class="s">favicon.svg</span>        <span class="c"># 16×16, 2 layers</span>
+├── <span class="s">logo-white.svg</span>     <span class="c"># for dark backgrounds</span>
+├── <span class="s">logo-black.svg</span>     <span class="c"># for light backgrounds</span>
+├── <span class="s">png/</span>               <span class="c"># 24 raster exports (icon 16–1024)</span>
+└── <span class="s">brand-showcase.html</span>
+
+<span class="c"># mark, full, wordmark and favicon adapt</span>
+<span class="c"># to prefers-color-scheme on their own</span></pre>
+    </div>
+  </div>
+</section>
+
+<footer class="dark">
+  <div class="wrap"><span><b>devstats</b> &middot; Brand Identity</span><span>luongnv89/devstats-cli &middot; Apache-2.0</span></div>
+</footer>
+
+</body>
+</html>

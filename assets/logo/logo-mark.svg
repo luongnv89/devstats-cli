@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="devstats mark">
+<title>devstats mark</title>
+<style>
+.e{fill:#0A0A0A;fill-opacity:.10}.g{fill:#2E8A57}.c{fill:#1A7FA3}.t{fill:#0A0A0A}
+@media (prefers-color-scheme:dark){.e{fill:#FAFAFA;fill-opacity:.12}.g{fill:#77CA9B}.c{fill:#56C8E8}.t{fill:#FAFAFA}}
+</style>
+<path class="e" d="M15.5,8a4.5,4.5 0 1,0 9,0a4.5,4.5 0 1,0 -9,0ZM27.5,8a4.5,4.5 0 1,0 9,0a4.5,4.5 0 1,0 -9,0ZM15.5,20a4.5,4.5 0 1,0 9,0a4.5,4.5 0 1,0 -9,0ZM27.5,20a4.5,4.5 0 1,0 9,0a4.5,4.5 0 1,0 -9,0ZM27.5,44a4.5,4.5 0 1,0 9,0a4.5,4.5 0 1,0 -9,0Z"/><path class="g" d="M39.5,20a4.5,4.5 0 1,0 9,0a4.5,4.5 0 1,0 -9,0ZM15.5,32a4.5,4.5 0 1,0 9,0a4.5,4.5 0 1,0 -9,0ZM27.5,32a4.5,4.5 0 1,0 9,0a4.5,4.5 0 1,0 -9,0ZM39.5,32a4.5,4.5 0 1,0 9,0a4.5,4.5 0 1,0 -9,0ZM15.5,44a4.5,4.5 0 1,0 9,0a4.5,4.5 0 1,0 -9,0ZM39.5,44a4.5,4.5 0 1,0 9,0a4.5,4.5 0 1,0 -9,0ZM15.5,56a4.5,4.5 0 1,0 9,0a4.5,4.5 0 1,0 -9,0ZM27.5,56a4.5,4.5 0 1,0 9,0a4.5,4.5 0 1,0 -9,0ZM39.5,56a4.5,4.5 0 1,0 9,0a4.5,4.5 0 1,0 -9,0Z"/><path class="c" d="M39.5,8a4.5,4.5 0 1,0 9,0a4.5,4.5 0 1,0 -9,0Z"/>
+</svg>
