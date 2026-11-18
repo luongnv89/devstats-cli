@@ -21,10 +21,16 @@ terminal table or written to a single self-contained HTML report.
 
 ## Install
 
+With Homebrew (macOS and Linux):
+
+```bash
+brew install luongnv89/tap/devstats
+```
+
 From source (Rust 1.82 or newer):
 
 ```bash
-cargo install --path .
+cargo install --git https://github.com/luongnv89/devstats-cli
 ```
 
 Prebuilt binaries for Linux, macOS, and Windows are attached to each tagged GitHub release
@@ -122,3 +128,7 @@ cargo test          # unit tests + integration tests against a mock GitHub API
 cargo clippy --all-targets -- -D warnings
 cargo fmt --all
 ```
+
+## License
+
+[Apache-2.0](LICENSE)
