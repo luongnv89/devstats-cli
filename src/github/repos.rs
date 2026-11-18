@@ -60,15 +60,18 @@ pub fn owner(client: &Client, login: &str) -> Result<Option<Owner>> {
 
 /// Every repository of the owner the token can read (forks and archived included;
 /// callers filter). Organizations are listed with `type=all`, which includes private
-/// repositories the token can see; if that listing answers with an unexpected status
+/// repositories the token can see; if that listing answers with an unexpected 4xx status
 /// (e.g. 403 for an organization that enforces SAML SSO), devstats falls back to the
-/// public listing. GitHub lists only the public repositories of a user account.
+/// public listing. A 5xx that outlasts the client's retries is an error, like on any
+/// other listing. GitHub lists only the public repositories of a user account.
 pub fn list(client: &Client, owner: &Owner) -> Result<Listing> {
     let mut failed_status = None;
     let items = if owner.is_org {
         let all = format!("/orgs/{}/repos?type=all&per_page=100", owner.login);
         match client.get_all(&all)? {
-            Pages::Stopped { resp, .. } if resp.status != 200 && resp.status != 404 => {
+            Pages::Stopped { resp, .. }
+                if resp.status != 200 && resp.status != 404 && resp.status < 500 =>
+            {
                 failed_status = Some(resp.status);
                 let public = format!("/orgs/{}/repos?type=public&per_page=100", owner.login);
                 items(client.get_all(&public)?)?

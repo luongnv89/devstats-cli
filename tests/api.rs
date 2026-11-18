@@ -713,6 +713,105 @@ fn rate_limit_on_the_listing_still_aborts() {
 }
 
 #[test]
+fn persistent_server_error_on_the_listing_still_aborts() {
+    let mut server = mockito::Server::new();
+    // Every attempt (the first plus the client's retries) answers 502.
+    let down = server
+        .mock("GET", "/orgs/acme/repos?type=all&per_page=100")
+        .with_status(502)
+        .with_header("content-type", "application/json")
+        .with_body(r#"{"message":"Bad Gateway"}"#)
+        .expect(4)
+        .create();
+    let public = server
+        .mock("GET", "/orgs/acme/repos?type=public&per_page=100")
+        .with_status(200)
+        .with_header("content-type", "application/json")
+        .with_body("[]")
+        .expect(0)
+        .create();
+    let _m = mock_acme(&mut server);
+    devstats()
+        .args(["acme", "--token", TOKEN, "--api-url", &server.url()])
+        .assert()
+        .code(1)
+        .stderr(predicate::str::contains("GitHub API returned 502"));
+    down.assert();
+    public.assert();
+}
+
+#[test]
+fn failure_on_a_later_page_falls_back_without_mixing_results() {
+    let mut server = mockito::Server::new();
+    let base = server.url();
+    let page1 = server
+        .mock("GET", "/orgs/acme/repos?type=all&per_page=100")
+        .with_status(200)
+        .with_header("content-type", "application/json")
+        .with_header(
+            "link",
+            &format!("<{base}/orgs/acme/repos?type=all&per_page=100&page=2>; rel=\"next\""),
+        )
+        .with_body(
+            json!([
+                {"name": "api", "fork": false, "archived": false, "private": false},
+                {"name": "extra", "fork": false, "archived": false, "private": false},
+                {"name": "vault", "fork": false, "archived": false, "private": true, "visibility": "private"},
+            ])
+            .to_string(),
+        )
+        .expect(1)
+        .create();
+    let page2 = server
+        .mock("GET", "/orgs/acme/repos?type=all&per_page=100&page=2")
+        .with_status(403)
+        .with_header("content-type", "application/json")
+        .with_body(r#"{"message":"Resource protected by organization SAML enforcement."}"#)
+        .expect(1)
+        .create();
+    let public = server
+        .mock("GET", "/orgs/acme/repos?type=public&per_page=100")
+        .with_status(200)
+        .with_header("content-type", "application/json")
+        .with_body(
+            json!([
+                {"name": "api", "fork": false, "archived": false},
+                {"name": "web", "fork": false, "archived": true},
+            ])
+            .to_string(),
+        )
+        .expect(1)
+        .create();
+    let page1_only: Vec<_> = ["extra", "vault"]
+        .iter()
+        .map(|name| {
+            server
+                .mock(
+                    "GET",
+                    path(&format!("/repos/acme/{name}/stats/contributors")),
+                )
+                .with_status(200)
+                .with_header("content-type", "application/json")
+                .with_body("[]")
+                .expect(0)
+                .create()
+        })
+        .collect();
+    let _m = mock_acme(&mut server);
+    let r = run_json(&server, &["--token", TOKEN]);
+    page1.assert();
+    page2.assert();
+    public.assert();
+    for m in &page1_only {
+        m.assert();
+    }
+    assert_eq!(r["orgs"][0]["private_access"], "listing_failed");
+    assert_eq!(r["totals"]["repos_private"], 0);
+    assert_eq!(r["totals"]["repos"], 2, "only the type=public listing");
+    assert_eq!(r["contributors"][0]["commits"], 12);
+}
+
+#[test]
 fn cache_is_not_shared_between_tokenless_and_token_runs() {
     let mut server = mockito::Server::new();
     let anon_listing = server
