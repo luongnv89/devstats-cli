@@ -48,7 +48,7 @@ impl Client {
             .map(Duration::from_millis)
             .unwrap_or(Duration::from_secs(1));
         let cache = if use_cache {
-            cache::Cache::from_env()
+            cache::Cache::from_env(token.as_deref())
         } else {
             None
         };
