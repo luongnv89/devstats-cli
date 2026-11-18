@@ -16,7 +16,7 @@ class Devstats < Formula
   desc "Contribution stats for every contributor across GitHub organizations"
   homepage "https://github.com/luongnv89/devstats-cli"
   url "https://github.com/luongnv89/devstats-cli/archive/refs/tags/v0.1.1.tar.gz"
-  sha256 "0000000000000000000000000000000000000000000000000000000000000000"
+  sha256 "13ea61af45e4fad676efd256a735d8f3786efbbd6b0b11f3ea1c6283e4c533fe"
   license "Apache-2.0"
   head "https://github.com/luongnv89/devstats-cli.git", branch: "main"
 
