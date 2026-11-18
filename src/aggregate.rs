@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use chrono::{Datelike, NaiveDate, TimeZone, Utc};
 
-use crate::cli::SortKey;
+use crate::cli::{Period, SortKey};
 use crate::model::{
     Contributor, OrgData, OrgReport, PrivateAccess, Range, Report, Totals, WeekPoint,
 };
@@ -16,6 +16,8 @@ pub const ACTIVITY_WEEKS: usize = 52;
 pub struct Options {
     pub since: Option<NaiveDate>,
     pub until: Option<NaiveDate>,
+    /// The preset that produced `since`, if any (shown in the report header).
+    pub period: Option<Period>,
     pub include_bots: bool,
     pub sort: SortKey,
     pub top: usize,
@@ -285,6 +287,8 @@ pub fn build(orgs: &[OrgData], o: &Options) -> Report {
         version: env!("CARGO_PKG_VERSION"),
         generated_at: Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string(),
         range: Range {
+            period: o.period,
+            period_label: o.period.map(|p| p.label()),
             since: o.since.map(|d| d.to_string()),
             until: o.until.map(|d| d.to_string()),
             activity_from: week_label(win.act_start),
@@ -385,6 +389,7 @@ mod tests {
         Options {
             since: None,
             until: None,
+            period: None,
             include_bots: false,
             sort: SortKey::Commits,
             top: 0,

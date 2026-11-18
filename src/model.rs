@@ -3,7 +3,7 @@
 use chrono::NaiveDate;
 use serde::Serialize;
 
-use crate::cli::SortKey;
+use crate::cli::{Period, SortKey};
 use crate::github::repos::Owner;
 use crate::github::stats::RepoStats;
 
@@ -110,6 +110,11 @@ pub struct OrgReport {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct Range {
+    /// The preset period (`all`, `1y`, `6m`, `3m`, `1m`, `1w`, `1d`), or null when
+    /// the range was given with --since/--until.
+    pub period: Option<Period>,
+    /// Human label for `period`, e.g. "last 1 year".
+    pub period_label: Option<&'static str>,
     pub since: Option<String>,
     pub until: Option<String>,
     /// Start date of the first of the 52 `activity` weeks.

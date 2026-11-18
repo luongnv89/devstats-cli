@@ -385,7 +385,8 @@ footer .sig { font-family: var(--mono); }
   orgNames.forEach((n, i) => { if (i) h1.append(el("span", { class: "sep" }, " · ")); h1.append(n); });
   document.title = "devstats · " + orgNames.join(", ");
   const r = D.range;
-  const rangeText = r.since && r.until ? r.since + " → " + r.until : r.since ? "since " + r.since : r.until ? "until " + r.until : "all time";
+  const dates = r.since && r.until ? r.since + " → " + r.until : r.since ? "since " + r.since : r.until ? "until " + r.until : "all time";
+  const rangeText = r.period_label && r.period_label !== dates ? r.period_label + " (" + dates + ")" : dates;
   const gen = new Date(D.generated_at);
   $("meta").append(
     el("span", null, rangeText),

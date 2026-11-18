@@ -19,6 +19,7 @@ fn help_lists_every_option() {
         "--format",
         "--sort",
         "--top",
+        "--period",
         "--since",
         "--until",
         "--include-forks",
@@ -36,6 +37,16 @@ fn help_lists_every_option() {
         assert!(help.contains(opt), "--help is missing {opt}");
     }
     assert!(help.contains("Examples:"));
+    for preset in ["all", "1y", "6m", "3m", "1m", "1w", "1d"] {
+        assert!(
+            help.contains(&format!("{preset}:")),
+            "--help is missing the {preset} preset"
+        );
+    }
+    assert!(
+        help.contains("default: 1y"),
+        "--help must state the 1y default"
+    );
 }
 
 #[test]
@@ -85,6 +96,22 @@ fn bad_enum_and_date_values_are_usage_errors() {
         .code(2)
         .stderr(predicate::str::contains("YYYY-MM-DD"));
     devstats().args(["acme", "--jobs", "0"]).assert().code(2);
+    devstats()
+        .args(["acme", "--period", "2y"])
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("1y"));
+}
+
+#[test]
+fn period_conflicts_with_explicit_dates() {
+    for flag in ["--since", "--until"] {
+        devstats()
+            .args(["acme", "--period", "6m", flag, "2025-01-01"])
+            .assert()
+            .code(2)
+            .stderr(predicate::str::contains("cannot be used with"));
+    }
 }
 
 #[test]
@@ -141,4 +168,20 @@ fn completions_flag_is_hidden_but_no_cache_is_listed() {
     devstats().arg("--help").assert().success().stdout(
         predicate::str::contains("--no-cache").and(predicate::str::contains("--completions").not()),
     );
+}
+
+#[test]
+fn readme_documents_every_preset_and_the_default() {
+    let readme =
+        std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/README.md")).unwrap();
+    assert!(
+        readme.contains("| `-p, --period` | `1y` |"),
+        "options table"
+    );
+    for preset in ["all", "1y", "6m", "3m", "1m", "1w", "1d"] {
+        assert!(
+            readme.contains(&format!("| `{preset}`")),
+            "README is missing {preset}"
+        );
+    }
 }
