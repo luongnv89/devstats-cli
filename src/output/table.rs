@@ -1,6 +1,6 @@
 //! `--format table` on a styled stdout: summary box and contributors table (btop look).
 
-use crate::model::{Contributor, Report};
+use crate::model::{Contributor, PrivateAccess, Report};
 use crate::style::components::{boxed, meter, sparkline, table, Col, Line};
 use crate::style::theme::Role;
 use crate::style::{sanitize, truncate, width, Mode};
@@ -162,7 +162,14 @@ fn summary_parts(r: &Report, mode: &Mode) -> (String, Vec<Line>, String) {
             r.orgs.len().to_string(),
             if r.orgs.len() == 1 { "org" } else { "orgs" }.into(),
         ),
-        (thousands(t.repos as u64), "repos".into()),
+        (
+            thousands(t.repos as u64),
+            if t.repos_private > 0 {
+                format!("repos ({} private)", thousands(t.repos_private as u64))
+            } else {
+                "repos".into()
+            },
+        ),
         (thousands(t.contributors as u64), "contributors".into()),
         (thousands(t.commits), "commits".into()),
         (
@@ -189,17 +196,50 @@ fn summary_parts(r: &Report, mode: &Mode) -> (String, Vec<Line>, String) {
         .collect();
     let names: Vec<String> = r.org_names().iter().map(|o| sanitize(o, false)).collect();
     let title = format!("devstats{}{}", sep(mode), names.join(", "));
-    let mut footer = format!(
-        "{}{}{}",
-        &r.generated_at[..10.min(r.generated_at.len())],
-        sep(mode),
-        range_label(r, mode)
-    );
+    let date = &r.generated_at[..10.min(r.generated_at.len())];
+    let mut rest = range_label(r, mode);
     let incomplete: usize = r.orgs.iter().map(|o| o.incomplete_repos.len()).sum();
     if incomplete > 0 {
-        footer.push_str(&format!("{}{incomplete} repos still computing", sep(mode)));
+        rest.push_str(&format!("{}{incomplete} repos still computing", sep(mode)));
     }
+    let public_only: Vec<String> = r
+        .orgs
+        .iter()
+        .filter(|o| o.private_access != PrivateAccess::Included)
+        .map(|o| sanitize(&o.login, false))
+        .collect();
+    let footer = if public_only.len() == r.orgs.len() && !public_only.is_empty() {
+        let all = "public repos only";
+        fit_footer(mode, date, &rest, all, all)
+    } else if !public_only.is_empty() {
+        let named = format!("private repos not included for {}", public_only.join(", "));
+        let counted = format!(
+            "private repos not included for {} of {} orgs",
+            public_only.len(),
+            r.orgs.len()
+        );
+        fit_footer(mode, date, &rest, &named, &counted)
+    } else {
+        format!("{date}{}{rest}", sep(mode))
+    };
     (title, items, footer)
+}
+
+/// A summary footer ending in a private-repo disclosure (`long`, or the shorter
+/// `short`). The box truncates its footer to the terminal width minus 6, so the
+/// disclosure must stay visible: use `long` if it fits, else `short`, then drop the
+/// date, and as a last resort put the disclosure first.
+fn fit_footer(mode: &Mode, date: &str, rest: &str, long: &str, short: &str) -> String {
+    let max = mode.width.saturating_sub(6);
+    let s = sep(mode);
+    [
+        format!("{date}{s}{rest}{s}{long}"),
+        format!("{date}{s}{rest}{s}{short}"),
+        format!("{rest}{s}{short}"),
+    ]
+    .into_iter()
+    .find(|f| width(f) <= max)
+    .unwrap_or_else(|| format!("{short}{s}{rest}"))
 }
 
 fn join((v, u): (String, &'static str)) -> String {
@@ -288,6 +328,9 @@ fn contributor_lines(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::cli::SortKey;
+    use crate::model::{OrgReport, Range, Totals};
+    use crate::style::{Glyphs, Tier};
 
     #[test]
     fn number_formats() {
@@ -297,5 +340,113 @@ mod tests {
         assert_eq!(compact(412_889), ("412.9".into(), "K"));
         assert_eq!(compact(1_920_000), ("1.92".into(), "M"));
         assert_eq!(compact(999_960), ("1.00".into(), "M"));
+    }
+
+    fn org(login: &str, access: PrivateAccess) -> OrgReport {
+        OrgReport {
+            login: login.into(),
+            name: None,
+            kind: "Organization",
+            avatar_url: String::new(),
+            html_url: String::new(),
+            totals: Totals::default(),
+            private_repos: 0,
+            private_access: access,
+            incomplete_repos: vec![],
+            contributors: vec![],
+            weekly: vec![],
+        }
+    }
+
+    fn report(orgs: Vec<OrgReport>) -> Report {
+        Report {
+            tool: "devstats",
+            version: "0",
+            generated_at: "2026-11-18T10:00:00Z".into(),
+            range: Range {
+                since: Some("2025-01-01".into()),
+                until: Some("2025-12-31".into()),
+                activity_from: "2025-01-05".into(),
+            },
+            sort: SortKey::Commits,
+            top: 0,
+            totals: Totals::default(),
+            orgs,
+            contributors: vec![],
+            weekly: vec![],
+            notes: vec![],
+        }
+    }
+
+    fn footer_line(out: &str) -> &str {
+        out.lines().find(|l| l.starts_with("╰")).unwrap()
+    }
+
+    #[test]
+    fn private_disclosure_survives_a_narrow_terminal() {
+        use PrivateAccess::*;
+        let mode = Mode::styled(Tier::None, Glyphs::Unicode, 80);
+        let r = report(vec![
+            org("acme-platform-engineering", Included),
+            org("acme-security-research", ListingFailed),
+        ]);
+        let out = render(&r, &mode, false);
+        let footer = footer_line(&out);
+        assert!(width(footer) <= 80, "{out}");
+        assert!(!footer.contains('…'), "{footer}");
+        assert!(
+            footer.contains("private repos not included for 1 of 2 orgs"),
+            "{footer}"
+        );
+        assert!(footer.contains("2025-01-01 → 2025-12-31"), "{footer}");
+
+        let mut r = r;
+        r.orgs[0].incomplete_repos = vec!["a".into(), "b".into()];
+        let out = render(&r, &mode, false);
+        let footer = footer_line(&out);
+        assert!(
+            footer.contains("private repos not included for 1 of 2 orgs"),
+            "{footer}"
+        );
+
+        let wide = Mode::styled(Tier::None, Glyphs::Unicode, 200);
+        let out = render(&r, &wide, false);
+        assert!(
+            footer_line(&out).contains(
+                "2026-11-18 · 2025-01-01 → 2025-12-31 · 2 repos still computing · \
+                 private repos not included for acme-security-research"
+            ),
+            "{out}"
+        );
+    }
+
+    #[test]
+    fn public_only_disclosure_survives_a_narrow_terminal() {
+        let mut r = report(vec![org("acme", PrivateAccess::NoToken)]);
+        r.orgs[0].incomplete_repos = vec!["a".into(), "b".into()];
+        for w in [80, 60] {
+            let mode = Mode::styled(Tier::None, Glyphs::Unicode, w);
+            let out = render(&r, &mode, false);
+            let footer = footer_line(&out);
+            assert!(width(footer) <= w, "{out}");
+            assert!(footer.contains("public repos only"), "{footer}");
+            // At 60 columns the disclosure leads and only the range after it is cut.
+            assert!(w == 60 || !footer.contains('…'), "{footer}");
+        }
+        r.orgs[0].incomplete_repos.clear();
+        let mode = Mode::styled(Tier::None, Glyphs::Unicode, 60);
+        let footer = render(&r, &mode, false);
+        let footer = footer_line(&footer);
+        assert!(!footer.contains('…'), "{footer}");
+        assert!(
+            footer.contains("2025-01-01 → 2025-12-31 · public repos only"),
+            "{footer}"
+        );
+        let wide = Mode::styled(Tier::None, Glyphs::Unicode, 200);
+        let out = render(&r, &wide, false);
+        assert!(
+            footer_line(&out).contains("2026-11-18 · 2025-01-01 → 2025-12-31 · public repos only"),
+            "{out}"
+        );
     }
 }

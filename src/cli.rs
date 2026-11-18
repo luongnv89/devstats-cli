@@ -14,7 +14,8 @@ Examples:
   devstats Montimage --format tsv --top 0 > contributors.tsv
 
 Token: --token > GITHUB_TOKEN > GH_TOKEN > `gh auth token` (github.com only).
-Without a token GitHub allows 60 requests/hour, which is rarely enough.";
+Without a token GitHub allows 60 requests/hour, which is rarely enough, and only
+public repositories are scanned.";
 
 #[derive(Parser, Debug, Clone)]
 #[command(
@@ -22,8 +23,9 @@ Without a token GitHub allows 60 requests/hour, which is rarely enough.";
     version,
     about = "Contribution stats for every contributor across GitHub organizations",
     long_about = "Collects commits, lines added/deleted, pull requests and issues for every \
-contributor in one or more public GitHub organizations (or users), then prints a ranked table \
-or writes a self-contained HTML report.",
+contributor in one or more GitHub organizations (or users), then prints a ranked table \
+or writes a self-contained HTML report. Private organization repositories are included when \
+the token can read them; without a token only public repositories are scanned.",
     after_help = EXAMPLES
 )]
 pub struct Cli {

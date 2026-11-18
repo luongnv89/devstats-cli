@@ -17,12 +17,34 @@ pub struct Item {
     pub created: NaiveDate,
 }
 
+/// Whether an organization's private repositories are in the scan, and if not, why.
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum PrivateAccess {
+    /// The listing returned at least one private repository; they are all scanned.
+    Included,
+    /// A token was used but the listing showed no private repositories. A listing
+    /// cannot tell "no access" from "no private repositories".
+    NoneVisible,
+    /// No token was used, so GitHub showed public repositories only.
+    NoToken,
+    /// The full listing failed (e.g. SAML SSO not authorized); public repositories only.
+    ListingFailed,
+    /// GitHub lists only the public repositories of a user account.
+    UserAccount,
+}
+
 /// Everything fetched for one organization, before aggregation.
 #[derive(Debug, Clone)]
 pub struct OrgData {
     pub owner: Owner,
     pub repos_scanned: Vec<String>,
     pub repos_skipped: usize,
+    /// Private repositories among `repos_scanned`.
+    pub private_repos: usize,
+    pub private_access: PrivateAccess,
+    /// HTTP status of the full repository listing when it failed (public repos only).
+    pub listing_status: Option<u16>,
     pub stats: Vec<RepoStats>,
     pub items: Vec<Item>,
 }
@@ -31,6 +53,8 @@ pub struct OrgData {
 pub struct Totals {
     pub contributors: usize,
     pub repos: usize,
+    /// Private repositories among `repos`.
+    pub repos_private: usize,
     pub repos_skipped: usize,
     pub commits: u64,
     pub additions: u64,
@@ -76,6 +100,9 @@ pub struct OrgReport {
     pub avatar_url: String,
     pub html_url: String,
     pub totals: Totals,
+    /// Private repositories scanned in this organization.
+    pub private_repos: usize,
+    pub private_access: PrivateAccess,
     pub incomplete_repos: Vec<String>,
     pub contributors: Vec<Contributor>,
     pub weekly: Vec<WeekPoint>,

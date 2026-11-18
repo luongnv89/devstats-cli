@@ -70,8 +70,33 @@ A user account works too. An unknown name prints a warning and the others still 
 
 devstats looks for a token in this order: `--token`, `GITHUB_TOKEN`, `GH_TOKEN`, then
 `gh auth token` (for github.com only). Without a token, GitHub allows only 60 requests per
-hour. That's rarely enough, so run `gh auth login` or export `GITHUB_TOKEN`. Public data
-needs no scopes.
+hour. That's rarely enough, so run `gh auth login` or export `GITHUB_TOKEN`. Public
+repositories need no scopes.
+
+### Private repositories
+
+An organization's private repositories are scanned when the token can read them. That
+needs one of:
+
+- a classic token with the `repo` scope (the token `gh auth login` creates has it), or
+- a fine-grained token whose resource owner is the organization, with access to the
+  repositories and the **Metadata** repository permission (read). Pull requests and
+  issues come from Search, which only returns items the token can read, so also grant
+  **Pull requests** (read) and **Issues** (read). Without them, private PRs and issues
+  are not counted.
+
+If the organization uses SAML single sign-on, the token must also be authorized for it.
+
+Without a token, or without access, only public repositories are scanned and the report
+says so: the table footer reads `public repos only`, the JSON has
+`orgs[].private_access` (`included`, `none_visible`, `no_token`, `listing_failed`, or
+`user_account`), and the HTML report shows it on each organization card and in the notes.
+`none_visible` means the token saw no private repositories: GitHub's listing can't tell
+"no access" from "no private repositories". If the full listing fails (for example SSO
+not authorized), devstats warns and falls back to the public repositories. The private
+count shows up in the repo totals (`totals.repos_private`).
+
+For a user account, GitHub lists only public repositories, so only those are scanned.
 
 ### Output
 
@@ -113,13 +138,17 @@ devstats --completions fish > ~/.config/fish/completions/devstats.fish
   more commits. GitHub computes these stats lazily, so the first run on a cold repository
   can take a minute while devstats retries.
 - **Pull requests and issues** come from one org-wide Search query each, counted by author and
-  creation date. Search returns at most 1,000 results per query, so devstats splits larger
+  creation date. Search covers every repository the token can read, private ones included. Search returns at most 1,000 results per query, so devstats splits larger
   date ranges automatically. Search is also limited to 30 requests per minute, so large orgs
   can pause briefly.
 - Contributors are merged by GitHub login across repositories and organizations. Bots are
   excluded by default.
+- Repositories are the organization's public ones plus the private ones the token can read
+  (see [Private repositories](#private-repositories)).
 - Responses are cached for an hour in `~/.cache/devstats` (or `$XDG_CACHE_HOME/devstats`), so
-  re-running with different `--sort`, `--top`, or `--html` options is instant.
+  re-running with different `--sort`, `--top`, or `--html` options is instant. The cache is
+  kept separately per token (keyed by a hash, never the token itself), so one token's private
+  data is never served to another token or to a tokenless run.
 
 ## Development
 
