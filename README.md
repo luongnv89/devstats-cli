@@ -1,8 +1,6 @@
 <p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="assets/logo/logo-white.svg">
-    <img src="assets/logo/logo-black.svg" alt="devstats" width="320">
-  </picture>
+  <img src="assets/logo/logo-black.svg#gh-light-mode-only" alt="devstats" width="320">
+  <img src="assets/logo/logo-white.svg#gh-dark-mode-only" alt="devstats" width="320">
 </p>
 
 [![CI](https://github.com/luongnv89/devstats-cli/actions/workflows/ci.yml/badge.svg)](https://github.com/luongnv89/devstats-cli/actions/workflows/ci.yml)
