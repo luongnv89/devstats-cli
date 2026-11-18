@@ -80,7 +80,10 @@ needs one of:
 
 - a classic token with the `repo` scope (the token `gh auth login` creates has it), or
 - a fine-grained token whose resource owner is the organization, with access to the
-  repositories and the **Metadata** repository permission (read).
+  repositories and the **Metadata** repository permission (read). Pull requests and
+  issues come from Search, which only returns items the token can read, so also grant
+  **Pull requests** (read) and **Issues** (read). Without them, private PRs and issues
+  are not counted.
 
 If the organization uses SAML single sign-on, the token must also be authorized for it.
 
