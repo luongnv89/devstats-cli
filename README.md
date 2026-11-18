@@ -240,7 +240,7 @@ A user account works too. An unknown name prints a warning and the others still 
 <details>
 <summary>Time period</summary>
 
-By default devstats reports on the **last 1 year**. Pick another preset with `--period`:
+By default devstats reports on the **last 1 year**. Before v0.2.0 the default was all time; pass `--period all` to get all-time totals. Pick another preset with `--period`:
 
 | Preset | Range |
 |---|---|
