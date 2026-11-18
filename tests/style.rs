@@ -39,7 +39,10 @@ fn t2_json_ignores_force_color() {
 fn t3_no_color_wins_over_force_color() {
     let mut server = mockito::Server::new();
     let _m = mock_acme(&mut server);
-    for env in [vec![("FORCE_COLOR", "1"), ("NO_COLOR", "1")], vec![("FORCE_COLOR", "1")]] {
+    for env in [
+        vec![("FORCE_COLOR", "1"), ("NO_COLOR", "1")],
+        vec![("FORCE_COLOR", "1")],
+    ] {
         let mut args = vec![];
         if env.len() == 1 {
             args.push("--no-color");
@@ -63,7 +66,12 @@ fn t4_force_color_styles_the_box() {
 #[test]
 fn t8_control_characters_are_escaped() {
     let mut server = mockito::Server::new();
-    let _s = json_mock(&mut server, "/repos/acme/api/stats/contributors", 200, json!([author("ev\u{1b}[31mil\tx", &[(1, 9, 9, 9)])]));
+    let _s = json_mock(
+        &mut server,
+        "/repos/acme/api/stats/contributors",
+        200,
+        json!([author("ev\u{1b}[31mil\tx", &[(1, 9, 9, 9)])]),
+    );
     let _m = mock_acme(&mut server);
     let plain = String::from_utf8(stdout_of(&server, &[], &["--format", "tsv"])).unwrap();
     assert!(!plain.as_bytes().contains(&ESC));
@@ -79,13 +87,26 @@ fn table_fits_narrow_terminals_and_ascii_locales() {
     let mut server = mockito::Server::new();
     let _m = mock_acme(&mut server);
     for cols in ["60", "80", "200"] {
-        let out = String::from_utf8(stdout_of(&server, &[("FORCE_COLOR", "1"), ("NO_COLOR", "1"), ("COLUMNS", cols)], &[])).unwrap();
+        let out = String::from_utf8(stdout_of(
+            &server,
+            &[("FORCE_COLOR", "1"), ("NO_COLOR", "1"), ("COLUMNS", cols)],
+            &[],
+        ))
+        .unwrap();
         let max: usize = cols.parse().unwrap();
         let widths: Vec<usize> = out.lines().map(UnicodeWidthStr::width).collect();
         assert!(widths.iter().all(|w| *w <= max), "COLUMNS={cols}: {out}");
-        assert!(widths.windows(2).all(|p| p[0] == p[1]), "all box lines share one width: {out}");
+        assert!(
+            widths.windows(2).all(|p| p[0] == p[1]),
+            "all box lines share one width: {out}"
+        );
     }
-    let ascii = String::from_utf8(stdout_of(&server, &[("FORCE_COLOR", "1"), ("NO_COLOR", "1"), ("LANG", "C")], &[])).unwrap();
+    let ascii = String::from_utf8(stdout_of(
+        &server,
+        &[("FORCE_COLOR", "1"), ("NO_COLOR", "1"), ("LANG", "C")],
+        &[],
+    ))
+    .unwrap();
     assert!(ascii.is_ascii(), "{ascii}");
     assert!(ascii.starts_with("+-[devstats - acme]"));
 }
@@ -94,7 +115,12 @@ fn table_fits_narrow_terminals_and_ascii_locales() {
 fn per_org_adds_one_box_per_org() {
     let mut server = mockito::Server::new();
     let _m = mock_acme(&mut server);
-    let out = String::from_utf8(stdout_of(&server, &[("FORCE_COLOR", "1"), ("NO_COLOR", "1")], &["--per-org"])).unwrap();
+    let out = String::from_utf8(stdout_of(
+        &server,
+        &[("FORCE_COLOR", "1"), ("NO_COLOR", "1")],
+        &["--per-org"],
+    ))
+    .unwrap();
     assert_eq!(out.matches("╭─┐").count(), 3, "{out}");
     assert!(out.contains("acme · top 2 by commits"));
 }

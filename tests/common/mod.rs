@@ -4,13 +4,24 @@
 use assert_cmd::Command;
 use mockito::{Matcher, Mock, ServerGuard};
 use serde_json::{json, Value};
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+static NEXT: AtomicUsize = AtomicUsize::new(0);
 
 /// `devstats` with an explicit, reproducible environment (btop-style.md §7).
 pub fn devstats() -> Command {
     let mut cmd = Command::cargo_bin("devstats").unwrap();
     for var in [
-        "FORCE_COLOR", "NO_COLOR", "CLICOLOR_FORCE", "COLORTERM", "COLUMNS", "LC_ALL", "LC_CTYPE",
-        "GITHUB_TOKEN", "GH_TOKEN", "DEVSTATS_API_URL",
+        "FORCE_COLOR",
+        "NO_COLOR",
+        "CLICOLOR_FORCE",
+        "COLORTERM",
+        "COLUMNS",
+        "LC_ALL",
+        "LC_CTYPE",
+        "GITHUB_TOKEN",
+        "GH_TOKEN",
+        "DEVSTATS_API_URL",
     ] {
         cmd.env_remove(var);
     }
@@ -18,13 +29,30 @@ pub fn devstats() -> Command {
         .env("LANG", "C.UTF-8")
         .env("DEVSTATS_NO_GH", "1")
         .env("DEVSTATS_BACKOFF_MS", "1")
-        .env("DEVSTATS_CACHE_DIR", std::env::temp_dir().join(format!("devstats-test-cache-{}", std::process::id())));
+        // A fresh cache dir per command: mock servers reuse ports, so a shared cache could leak between tests.
+        .env(
+            "DEVSTATS_CACHE_DIR",
+            std::env::temp_dir().join(format!(
+                "devstats-test-{}-{}",
+                std::process::id(),
+                NEXT.fetch_add(1, Ordering::SeqCst)
+            )),
+        );
     cmd
 }
 
 /// Match a path regardless of its query string.
 pub fn path(p: &str) -> Matcher {
-    let escaped: String = p.chars().flat_map(|c| if "[].?+*()".contains(c) { vec!['\\', c] } else { vec![c] }).collect();
+    let escaped: String = p
+        .chars()
+        .flat_map(|c| {
+            if "[].?+*()".contains(c) {
+                vec!['\\', c]
+            } else {
+                vec![c]
+            }
+        })
+        .collect();
     Matcher::Regex(format!("^{escaped}(\\?.*)?$"))
 }
 
@@ -39,14 +67,21 @@ pub fn json_mock(server: &mut ServerGuard, p: &str, status: usize, body: Value) 
 
 /// Unix timestamp of the Sunday starting the week `weeks_ago` weeks before now.
 pub fn week(weeks_ago: i64) -> i64 {
-    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64;
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i64;
     let day = now / 86_400;
     let sunday = day - (day + 4) % 7; // 1970-01-01 was a Thursday
     (sunday - 7 * weeks_ago) * 86_400
 }
 
 pub fn author(login: &str, weeks: &[(i64, u64, u64, u64)]) -> Value {
-    let kind = if login.ends_with("[bot]") { "Bot" } else { "User" };
+    let kind = if login.ends_with("[bot]") {
+        "Bot"
+    } else {
+        "User"
+    };
     json!({
         "author": {"login": login, "type": kind, "avatar_url": format!("https://avatars.example/{login}")},
         "weeks": weeks.iter().map(|&(w, c, a, d)| json!({"w": week(w), "c": c, "a": a, "d": d})).collect::<Vec<_>>()

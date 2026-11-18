@@ -61,7 +61,10 @@ pub fn fetch_all(
             break;
         }
         if round > 0 {
-            client.ui.debug(&format!("{} repo(s) still computing stats; retrying", pending.len()));
+            client.ui.debug(&format!(
+                "{} repo(s) still computing stats; retrying",
+                pending.len()
+            ));
             std::thread::sleep(client.backoff * *pause);
         }
         let results = par_map(&pending, jobs, |&i| {
@@ -74,7 +77,13 @@ pub fn fetch_all(
         let mut still = Vec::new();
         for (&i, r) in pending.iter().zip(results) {
             match r {
-                Fetch::Ready(authors) => done[i] = Some(RepoStats { repo: repos[i].clone(), authors, complete: true }),
+                Fetch::Ready(authors) => {
+                    done[i] = Some(RepoStats {
+                        repo: repos[i].clone(),
+                        authors,
+                        complete: true,
+                    })
+                }
                 Fetch::Computing => still.push(i),
             }
         }
@@ -85,7 +94,11 @@ pub fn fetch_all(
             "GitHub is still computing stats for {owner}/{}; its commits are missing. Run again in a minute",
             repos[i]
         ));
-        done[i] = Some(RepoStats { repo: repos[i].clone(), authors: vec![], complete: false });
+        done[i] = Some(RepoStats {
+            repo: repos[i].clone(),
+            authors: vec![],
+            complete: false,
+        });
     }
     Ok(done.into_iter().flatten().collect())
 }
@@ -98,14 +111,18 @@ fn fetch_one(client: &Client, owner: &str, repo: &str) -> Result<Fetch> {
         202 => Ok(Fetch::Computing),
         204 | 404 | 409 | 451 => Ok(Fetch::Ready(vec![])), // empty, gone, or blocked repo
         s => {
-            client.ui.warn(&format!("skipping {owner}/{repo}: GitHub returned {s} for its stats"));
+            client.ui.warn(&format!(
+                "skipping {owner}/{repo}: GitHub returned {s} for its stats"
+            ));
             Ok(Fetch::Ready(vec![]))
         }
     }
 }
 
 pub fn parse(body: &Value) -> Vec<AuthorStats> {
-    let Some(items) = body.as_array() else { return vec![] };
+    let Some(items) = body.as_array() else {
+        return vec![];
+    };
     items
         .iter()
         .filter_map(|item| {
@@ -128,13 +145,25 @@ pub fn parse(body: &Value) -> Vec<AuthorStats> {
                         .collect()
                 })
                 .unwrap_or_default();
-            Some(AuthorStats { login, avatar_url: author["avatar_url"].as_str().unwrap_or_default().to_string(), is_bot, weeks })
+            Some(AuthorStats {
+                login,
+                avatar_url: author["avatar_url"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .to_string(),
+                is_bot,
+                weeks,
+            })
         })
         .collect()
 }
 
 /// Map `f` over `items` with up to `jobs` threads, keeping order. Stops early on the first error.
-pub fn par_map<T: Sync, R: Send>(items: &[T], jobs: usize, f: impl Fn(&T) -> Result<R> + Sync) -> Result<Vec<R>> {
+pub fn par_map<T: Sync, R: Send>(
+    items: &[T],
+    jobs: usize,
+    f: impl Fn(&T) -> Result<R> + Sync,
+) -> Result<Vec<R>> {
     let n = items.len();
     let next = AtomicUsize::new(0);
     let failed = AtomicBool::new(false);
@@ -157,12 +186,18 @@ pub fn par_map<T: Sync, R: Send>(items: &[T], jobs: usize, f: impl Fn(&T) -> Res
             });
         }
     });
-    let results: Vec<Option<Result<R>>> = slots.into_iter().map(|m| m.into_inner().unwrap()).collect();
+    let results: Vec<Option<Result<R>>> =
+        slots.into_iter().map(|m| m.into_inner().unwrap()).collect();
     if let Some(pos) = results.iter().position(|r| matches!(r, Some(Err(_)))) {
-        let Some(Some(Err(e))) = results.into_iter().nth(pos) else { unreachable!() };
+        let Some(Some(Err(e))) = results.into_iter().nth(pos) else {
+            unreachable!()
+        };
         return Err(e);
     }
-    Ok(results.into_iter().map(|r| r.and_then(|r| r.ok()).expect("every slot filled")).collect())
+    Ok(results
+        .into_iter()
+        .map(|r| r.and_then(|r| r.ok()).expect("every slot filled"))
+        .collect())
 }
 
 #[cfg(test)]
@@ -189,8 +224,16 @@ mod tests {
         let items: Vec<u32> = (0..50).collect();
         let out = par_map(&items, 8, |x| Ok(x * 2)).unwrap();
         assert_eq!(out, items.iter().map(|x| x * 2).collect::<Vec<_>>());
-        let err = par_map(&items, 4, |&x| if x == 7 { Err(crate::error::AppError::runtime("boom")) } else { Ok(x) });
+        let err = par_map(&items, 4, |&x| {
+            if x == 7 {
+                Err(crate::error::AppError::runtime("boom"))
+            } else {
+                Ok(x)
+            }
+        });
         assert_eq!(err.unwrap_err().msg, "boom");
-        assert!(par_map(&Vec::<u32>::new(), 4, |x| Ok(*x)).unwrap().is_empty());
+        assert!(par_map(&Vec::<u32>::new(), 4, |x| Ok(*x))
+            .unwrap()
+            .is_empty());
     }
 }

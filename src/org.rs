@@ -18,11 +18,16 @@ pub fn parse_org(input: &str) -> Result<String> {
     }
     let s = s.split(['?', '#']).next().unwrap_or("");
     let parts: Vec<&str> = s.split('/').filter(|p| !p.is_empty()).collect();
-    let bad = || AppError::input(format!("'{}' is not a GitHub organization", printable(raw))).hint(HINT);
+    let bad =
+        || AppError::input(format!("'{}' is not a GitHub organization", printable(raw))).hint(HINT);
     let name = match parts.as_slice() {
         [] => return Err(bad()),
         [host] if host.contains('.') => {
-            return Err(AppError::input(format!("'{}' has no organization in its path", printable(raw))).hint(HINT))
+            return Err(AppError::input(format!(
+                "'{}' has no organization in its path",
+                printable(raw)
+            ))
+            .hint(HINT))
         }
         [host, org, ..] if host.contains('.') => *org,
         [first, ..] => *first,
@@ -76,12 +81,25 @@ mod tests {
         ] {
             assert_eq!(parse_org(input).unwrap(), "Montimage", "input: {input}");
         }
-        assert_eq!(parse_org("https://github.com/montimage-projects").unwrap(), "montimage-projects");
+        assert_eq!(
+            parse_org("https://github.com/montimage-projects").unwrap(),
+            "montimage-projects"
+        );
     }
 
     #[test]
     fn rejects_junk() {
-        for input in ["", "   ", "https://github.com", "github.com/", "bad name", "-lead", "a_b", "x".repeat(40).as_str(), "héllo"] {
+        for input in [
+            "",
+            "   ",
+            "https://github.com",
+            "github.com/",
+            "bad name",
+            "-lead",
+            "a_b",
+            "x".repeat(40).as_str(),
+            "héllo",
+        ] {
             let err = parse_org(input).unwrap_err();
             assert_eq!(err.exit_code(), 3, "input: {input}");
             assert!(err.hint.is_some());
@@ -90,7 +108,12 @@ mod tests {
 
     #[test]
     fn dedupes_case_insensitively() {
-        let got = parse_all(&["Montimage".into(), "https://github.com/montimage".into(), "b".into()]).unwrap();
+        let got = parse_all(&[
+            "Montimage".into(),
+            "https://github.com/montimage".into(),
+            "b".into(),
+        ])
+        .unwrap();
         assert_eq!(got, vec!["Montimage".to_string(), "b".to_string()]);
     }
 }

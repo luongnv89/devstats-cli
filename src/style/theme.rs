@@ -24,8 +24,18 @@ pub enum Role {
     Grad(u8),
 }
 
-const BORDERS: [(u8, u8, u8); 4] = [(0x55, 0x6d, 0x59), (0x6c, 0x6c, 0x4b), (0x5c, 0x58, 0x8d), (0x80, 0x52, 0x52)];
-const BORDERS16: [AnsiColor; 4] = [AnsiColor::Green, AnsiColor::Yellow, AnsiColor::Magenta, AnsiColor::Red];
+const BORDERS: [(u8, u8, u8); 4] = [
+    (0x55, 0x6d, 0x59),
+    (0x6c, 0x6c, 0x4b),
+    (0x5c, 0x58, 0x8d),
+    (0x80, 0x52, 0x52),
+];
+const BORDERS16: [AnsiColor; 4] = [
+    AnsiColor::Green,
+    AnsiColor::Yellow,
+    AnsiColor::Magenta,
+    AnsiColor::Red,
+];
 const ACCENT: (u8, u8, u8) = (0xb5, 0x40, 0x40);
 const LOW: (u8, u8, u8) = (0x77, 0xca, 0x9b);
 const MID: (u8, u8, u8) = (0xcb, 0xc0, 0x6c);
@@ -34,8 +44,13 @@ const HIGH: (u8, u8, u8) = (0xdc, 0x4c, 0x4c);
 /// Gradient color at position 0-100: linear low→mid over 0-50, mid→high over 50-100.
 pub fn gradient(pos: u8) -> (u8, u8, u8) {
     let p = pos.min(100) as f64;
-    let (a, b, t) = if p <= 50.0 { (LOW, MID, p / 50.0) } else { (MID, HIGH, (p - 50.0) / 50.0) };
-    let mix = |x: u8, y: u8| round_half_up(x as f64 + (y as f64 - x as f64) * t).clamp(0, 255) as u8;
+    let (a, b, t) = if p <= 50.0 {
+        (LOW, MID, p / 50.0)
+    } else {
+        (MID, HIGH, (p - 50.0) / 50.0)
+    };
+    let mix =
+        |x: u8, y: u8| round_half_up(x as f64 + (y as f64 - x as f64) * t).clamp(0, 255) as u8;
     (mix(a.0, b.0), mix(a.1, b.1), mix(a.2, b.2))
 }
 
@@ -49,7 +64,9 @@ pub fn to_256((r, g, b): (u8, u8, u8)) -> u8 {
     if r11 == g11 && g11 == b11 {
         (232 + r11).min(255) as u8
     } else {
-        (16 + 36 * round_half_up(r as f64 / 51.0) + 6 * round_half_up(g as f64 / 51.0) + round_half_up(b as f64 / 51.0)) as u8
+        (16 + 36 * round_half_up(r as f64 / 51.0)
+            + 6 * round_half_up(g as f64 / 51.0)
+            + round_half_up(b as f64 / 51.0)) as u8
     }
 }
 
@@ -78,7 +95,9 @@ pub fn style(role: Role, tier: Tier) -> Style {
     match role {
         Role::Text => s,
         Role::Title => s.effects(Effects::BOLD),
-        Role::Accent => s.fg_color(rgb(tier, ACCENT, AnsiColor::BrightRed)).effects(Effects::BOLD),
+        Role::Accent => s
+            .fg_color(rgb(tier, ACCENT, AnsiColor::BrightRed))
+            .effects(Effects::BOLD),
         Role::Dim => s.effects(Effects::DIMMED),
         Role::Border(i) => {
             let i = (i % 4) as usize;

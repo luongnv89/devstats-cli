@@ -18,7 +18,11 @@ pub fn render(report: &Report) -> String {
             c.prs_merged.to_string(),
             c.issues.to_string(),
             c.repos.to_string(),
-            c.orgs.iter().map(|o| sanitize(o, true)).collect::<Vec<_>>().join(","),
+            c.orgs
+                .iter()
+                .map(|o| sanitize(o, true))
+                .collect::<Vec<_>>()
+                .join(","),
         ];
         out.push_str(&fields.join("\t"));
         out.push('\n');

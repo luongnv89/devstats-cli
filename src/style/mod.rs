@@ -36,10 +36,20 @@ pub struct Mode {
 }
 
 impl Mode {
-    pub const PLAIN: Mode = Mode { styled: false, tier: Tier::None, glyphs: Glyphs::Ascii, width: 80 };
+    pub const PLAIN: Mode = Mode {
+        styled: false,
+        tier: Tier::None,
+        glyphs: Glyphs::Ascii,
+        width: 80,
+    };
 
     pub fn styled(tier: Tier, glyphs: Glyphs, width: usize) -> Mode {
-        Mode { styled: true, tier, glyphs, width }
+        Mode {
+            styled: true,
+            tier,
+            glyphs,
+            width,
+        }
     }
     pub fn color(&self) -> bool {
         self.styled && self.tier != Tier::None
@@ -84,11 +94,17 @@ impl Env {
         let (is_tty, tty_width) = match stream {
             Stream::Stdout => {
                 let s = std::io::stdout();
-                (s.is_terminal(), terminal_size::terminal_size_of(&s).map(|(w, _)| w.0 as usize))
+                (
+                    s.is_terminal(),
+                    terminal_size::terminal_size_of(&s).map(|(w, _)| w.0 as usize),
+                )
             }
             Stream::Stderr => {
                 let s = std::io::stderr();
-                (s.is_terminal(), terminal_size::terminal_size_of(&s).map(|(w, _)| w.0 as usize))
+                (
+                    s.is_terminal(),
+                    terminal_size::terminal_size_of(&s).map(|(w, _)| w.0 as usize),
+                )
             }
         };
         Env {
@@ -96,7 +112,9 @@ impl Env {
             force_color: var("FORCE_COLOR"),
             no_color: var("NO_COLOR"),
             colorterm: var("COLORTERM"),
-            locale: var("LC_ALL").or_else(|| var("LC_CTYPE")).or_else(|| var("LANG")),
+            locale: var("LC_ALL")
+                .or_else(|| var("LC_CTYPE"))
+                .or_else(|| var("LANG")),
             wt_session: var("WT_SESSION").is_some(),
             columns: var("COLUMNS"),
             is_tty,
@@ -124,7 +142,10 @@ pub fn decide(env: &Env, stream: Stream, machine: bool, no_color_flag: bool) -> 
         || env.term.as_deref() == Some("dumb")
         || (!env.is_tty && !env.forced());
     if plain {
-        return Mode { width, ..Mode::PLAIN };
+        return Mode {
+            width,
+            ..Mode::PLAIN
+        };
     }
     let tier = if no_color_flag || env.no_color.is_some() {
         Tier::None
@@ -139,7 +160,11 @@ pub fn decide(env: &Env, stream: Stream, machine: bool, no_color_flag: bool) -> 
         let l = l.to_ascii_lowercase();
         l.contains("utf-8") || l.contains("utf8")
     }) || (cfg!(windows) && env.wt_session);
-    Mode::styled(tier, if utf8 { Glyphs::Unicode } else { Glyphs::Ascii }, width)
+    Mode::styled(
+        tier,
+        if utf8 { Glyphs::Unicode } else { Glyphs::Ascii },
+        width,
+    )
 }
 
 /// Replace control characters in user-supplied text with visible escapes.
@@ -199,42 +224,81 @@ mod tests {
     use super::*;
 
     fn tty() -> Env {
-        Env { is_tty: true, term: Some("xterm-256color".into()), locale: Some("C.UTF-8".into()), ..Default::default() }
+        Env {
+            is_tty: true,
+            term: Some("xterm-256color".into()),
+            locale: Some("C.UTF-8".into()),
+            ..Default::default()
+        }
     }
 
     #[test]
     fn piped_stdout_is_plain_unless_forced() {
-        let env = Env { is_tty: false, ..tty() };
+        let env = Env {
+            is_tty: false,
+            ..tty()
+        };
         assert!(!decide(&env, Stream::Stdout, false, false).styled);
-        let forced = Env { force_color: Some("1".into()), ..env.clone() };
+        let forced = Env {
+            force_color: Some("1".into()),
+            ..env.clone()
+        };
         assert!(decide(&forced, Stream::Stdout, false, false).styled);
-        let zero = Env { force_color: Some("0".into()), ..env };
+        let zero = Env {
+            force_color: Some("0".into()),
+            ..env
+        };
         assert!(!decide(&zero, Stream::Stdout, false, false).styled);
     }
 
     #[test]
     fn machine_format_wins_over_force_color_on_stdout_only() {
-        let env = Env { force_color: Some("1".into()), ..tty() };
+        let env = Env {
+            force_color: Some("1".into()),
+            ..tty()
+        };
         assert!(!decide(&env, Stream::Stdout, true, false).styled);
         assert!(decide(&env, Stream::Stderr, true, false).styled);
     }
 
     #[test]
     fn dumb_terminal_is_plain() {
-        let env = Env { term: Some("dumb".into()), ..tty() };
+        let env = Env {
+            term: Some("dumb".into()),
+            ..tty()
+        };
         assert!(!decide(&env, Stream::Stdout, false, false).styled);
     }
 
     #[test]
     fn color_tiers() {
-        assert_eq!(decide(&tty(), Stream::Stdout, false, false).tier, Tier::Ansi256);
+        assert_eq!(
+            decide(&tty(), Stream::Stdout, false, false).tier,
+            Tier::Ansi256
+        );
         assert_eq!(decide(&tty(), Stream::Stdout, false, true).tier, Tier::None);
-        let nc = Env { no_color: Some("1".into()), force_color: Some("1".into()), ..tty() };
+        let nc = Env {
+            no_color: Some("1".into()),
+            force_color: Some("1".into()),
+            ..tty()
+        };
         assert_eq!(decide(&nc, Stream::Stdout, false, false).tier, Tier::None);
-        let tc = Env { colorterm: Some("truecolor".into()), ..tty() };
-        assert_eq!(decide(&tc, Stream::Stdout, false, false).tier, Tier::TrueColor);
-        let basic = Env { term: Some("xterm".into()), ..tty() };
-        assert_eq!(decide(&basic, Stream::Stdout, false, false).tier, Tier::Ansi16);
+        let tc = Env {
+            colorterm: Some("truecolor".into()),
+            ..tty()
+        };
+        assert_eq!(
+            decide(&tc, Stream::Stdout, false, false).tier,
+            Tier::TrueColor
+        );
+        let basic = Env {
+            term: Some("xterm".into()),
+            ..tty()
+        };
+        assert_eq!(
+            decide(&basic, Stream::Stdout, false, false).tier,
+            Tier::Ansi16
+        );
     }
 
     #[test]
@@ -242,7 +306,11 @@ mod tests {
         let m = decide(&tty(), Stream::Stdout, false, false);
         assert_eq!(m.glyphs, Glyphs::Unicode);
         assert_eq!(m.width, 80);
-        let c = Env { locale: Some("C".into()), columns: Some("132".into()), ..tty() };
+        let c = Env {
+            locale: Some("C".into()),
+            columns: Some("132".into()),
+            ..tty()
+        };
         let m = decide(&c, Stream::Stdout, false, false);
         assert_eq!((m.glyphs, m.width), (Glyphs::Ascii, 132));
     }

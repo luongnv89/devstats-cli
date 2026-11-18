@@ -34,10 +34,16 @@ pub fn owner(client: &Client, login: &str) -> Result<Option<Owner>> {
     let b = &r.body;
     Ok(Some(Owner {
         login: b["login"].as_str().unwrap_or(login).to_string(),
-        name: b["name"].as_str().filter(|s| !s.is_empty()).map(str::to_string),
+        name: b["name"]
+            .as_str()
+            .filter(|s| !s.is_empty())
+            .map(str::to_string),
         is_org: b["type"].as_str() == Some("Organization"),
         avatar_url: b["avatar_url"].as_str().unwrap_or_default().to_string(),
-        html_url: b["html_url"].as_str().map(str::to_string).unwrap_or_else(|| format!("https://github.com/{login}")),
+        html_url: b["html_url"]
+            .as_str()
+            .map(str::to_string)
+            .unwrap_or_else(|| format!("https://github.com/{login}")),
     }))
 }
 
@@ -49,7 +55,11 @@ pub fn list(client: &Client, owner: &Owner) -> Result<Vec<Repo>> {
         format!("/users/{}/repos?type=owner&per_page=100", owner.login)
     };
     let items = client.get_all(&path)?.unwrap_or_default();
-    Ok(items.iter().filter(|r| !r["private"].as_bool().unwrap_or(false)).filter_map(repo_from).collect())
+    Ok(items
+        .iter()
+        .filter(|r| !r["private"].as_bool().unwrap_or(false))
+        .filter_map(repo_from)
+        .collect())
 }
 
 fn repo_from(v: &Value) -> Option<Repo> {

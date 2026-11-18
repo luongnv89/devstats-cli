@@ -32,8 +32,11 @@ pub fn render(report: &Report) -> String {
 
 pub fn write(report: &Report, path: &Path) -> Result<()> {
     std::fs::write(path, render(report)).map_err(|e| {
-        AppError::runtime(format!("cannot write the HTML report to {}: {e}", path.display()))
-            .hint("check that the folder exists and is writable, or pass another path with --html=PATH")
+        AppError::runtime(format!(
+            "cannot write the HTML report to {}: {e}",
+            path.display()
+        ))
+        .hint("check that the folder exists and is writable, or pass another path with --html=PATH")
     })
 }
 

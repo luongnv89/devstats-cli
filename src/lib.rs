@@ -35,8 +35,27 @@ pub fn run() -> i32 {
         Ok(c) => c,
         Err(e) => e.exit(),
     };
-    let out_mode = decide(&Env::capture(Stream::Stdout), Stream::Stdout, cli.format != Format::Table, cli.no_color);
-    let err_mode = decide(&Env::capture(Stream::Stderr), Stream::Stderr, false, cli.no_color);
+    if let Some(shell) = cli.completions {
+        let mut cmd = Cli::command();
+        let mut buf = Vec::new();
+        clap_complete::generate(shell, &mut cmd, "devstats", &mut buf);
+        return match write_stdout(&String::from_utf8_lossy(&buf)) {
+            Ok(()) => 0,
+            Err(e) => e.exit_code(),
+        };
+    }
+    let out_mode = decide(
+        &Env::capture(Stream::Stdout),
+        Stream::Stdout,
+        cli.format != Format::Table,
+        cli.no_color,
+    );
+    let err_mode = decide(
+        &Env::capture(Stream::Stderr),
+        Stream::Stderr,
+        false,
+        cli.no_color,
+    );
     let ui = Arc::new(Reporter::new(err_mode, cli.verbose, cli.quiet));
     match execute(&cli, ui.clone(), out_mode) {
         Ok(()) => 0,
@@ -51,7 +70,9 @@ pub fn run() -> i32 {
 /// NO_COLOR turn it off entirely, FORCE_COLOR forces it, otherwise clap checks the TTY.
 fn help_color() -> clap::ColorChoice {
     let set = |k: &str| std::env::var(k).ok().filter(|v| !v.is_empty());
-    let no_color_flag = std::env::args_os().take_while(|a| a != "--").any(|a| a == "--no-color");
+    let no_color_flag = std::env::args_os()
+        .take_while(|a| a != "--")
+        .any(|a| a == "--no-color");
     if no_color_flag || set("NO_COLOR").is_some() || set("TERM").as_deref() == Some("dumb") {
         clap::ColorChoice::Never
     } else if set("FORCE_COLOR").is_some_and(|v| v != "0") {
@@ -64,7 +85,8 @@ fn help_color() -> clap::ColorChoice {
 fn execute(cli: &Cli, ui: Arc<Reporter>, out_mode: Mode) -> Result<()> {
     if let (Some(s), Some(u)) = (cli.since, cli.until) {
         if s > u {
-            return Err(AppError::usage(format!("--since {s} is after --until {u}")).hint("swap the two dates"));
+            return Err(AppError::usage(format!("--since {s} is after --until {u}"))
+                .hint("swap the two dates"));
         }
     }
     let logins = org::parse_all(&cli.orgs)?;
@@ -72,14 +94,21 @@ fn execute(cli: &Cli, ui: Arc<Reporter>, out_mode: Mode) -> Result<()> {
     let api = cli
         .api_url
         .clone()
-        .or_else(|| std::env::var("DEVSTATS_API_URL").ok().filter(|s| !s.is_empty()))
+        .or_else(|| {
+            std::env::var("DEVSTATS_API_URL")
+                .ok()
+                .filter(|s| !s.is_empty())
+        })
         .unwrap_or_else(|| DEFAULT_API.to_string());
-    let token = github::resolve_token(cli.token.as_deref(), api.trim_end_matches('/') == DEFAULT_API);
+    let token = github::resolve_token(
+        cli.token.as_deref(),
+        api.trim_end_matches('/') == DEFAULT_API,
+    );
     match &token {
         Some((_, source)) => ui.debug(&format!("using the token from {source}")),
         None => ui.warn("no GitHub token found; GitHub allows only 60 requests/hour without one (set GITHUB_TOKEN or run `gh auth login`)"),
     }
-    let client = Client::new(&api, token.map(|(t, _)| t), ui.clone());
+    let client = Client::new(&api, token.map(|(t, _)| t), ui.clone(), !cli.no_cache);
 
     // Keep the progress line's clock moving during long waits.
     let running = AtomicBool::new(true);
@@ -104,8 +133,10 @@ fn execute(cli: &Cli, ui: Arc<Reporter>, out_mode: Mode) -> Result<()> {
     })?;
     ui.clear();
     if data.is_empty() {
-        return Err(AppError::input("none of the given organizations exist on GitHub")
-            .hint("check the spelling, e.g. https://github.com/Montimage"));
+        return Err(
+            AppError::input("none of the given organizations exist on GitHub")
+                .hint("check the spelling, e.g. https://github.com/Montimage"),
+        );
     }
 
     let opts = aggregate::Options {
@@ -135,7 +166,9 @@ fn execute(cli: &Cli, ui: Arc<Reporter>, out_mode: Mode) -> Result<()> {
 fn collect_org(client: &Client, login: &str, cli: &Cli) -> Result<Option<OrgData>> {
     client.ui.progress(login, 0, None);
     let Some(owner) = repos::owner(client, login)? else {
-        client.ui.warn(&format!("'{login}' was not found on GitHub; skipping it"));
+        client
+            .ui
+            .warn(&format!("'{login}' was not found on GitHub; skipping it"));
         return Ok(None);
     };
     let all = repos::list(client, &owner)?;
@@ -146,7 +179,11 @@ fn collect_org(client: &Client, login: &str, cli: &Cli) -> Result<Option<OrgData
         .filter(|r| !(cli.exclude_archived && r.archived))
         .map(|r| r.name)
         .collect();
-    client.ui.debug(&format!("{}: {} of {total} repos to scan", owner.login, scanned.len()));
+    client.ui.debug(&format!(
+        "{}: {} of {total} repos to scan",
+        owner.login,
+        scanned.len()
+    ));
     client.ui.progress(&owner.login, 0, Some(scanned.len()));
 
     let from = cli.since.unwrap_or_else(search::epoch);
@@ -155,15 +192,29 @@ fn collect_org(client: &Client, login: &str, cli: &Cli) -> Result<Option<OrgData
     let (repo_stats, items) = std::thread::scope(|s| {
         let search = s.spawn(|| -> Result<Vec<model::Item>> {
             let mut items = search::fetch(client, &owner.login, owner.is_org, true, from, to)?;
-            items.extend(search::fetch(client, &owner.login, owner.is_org, false, from, to)?);
+            items.extend(search::fetch(
+                client,
+                &owner.login,
+                owner.is_org,
+                false,
+                from,
+                to,
+            )?);
             Ok(items)
         });
         let on_done = |n: usize| client.ui.progress(&owner.login, n, Some(scanned.len()));
         let st = stats::fetch_all(client, &owner.login, &scanned, cli.jobs as usize, &on_done);
         if !search.is_finished() {
-            client.ui.progress_note(&owner.login, "counting pull requests and issues");
+            client
+                .ui
+                .progress_note(&owner.login, "counting pull requests and issues");
         }
-        (st, search.join().unwrap_or_else(|_| Err(AppError::runtime("search worker crashed"))))
+        (
+            st,
+            search
+                .join()
+                .unwrap_or_else(|_| Err(AppError::runtime("search worker crashed"))),
+        )
     });
     Ok(Some(OrgData {
         repos_skipped: total - scanned.len(),

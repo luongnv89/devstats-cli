@@ -19,7 +19,14 @@ pub fn epoch() -> NaiveDate {
 const SEARCH_CAP: u64 = 1000;
 
 /// Every PR (`prs = true`) or issue opened in the owner's repositories within `from..=to`.
-pub fn fetch(client: &Client, owner: &str, is_org: bool, prs: bool, from: NaiveDate, to: NaiveDate) -> Result<Vec<Item>> {
+pub fn fetch(
+    client: &Client,
+    owner: &str,
+    is_org: bool,
+    prs: bool,
+    from: NaiveDate,
+    to: NaiveDate,
+) -> Result<Vec<Item>> {
     let mut out = Vec::new();
     fetch_range(client, owner, is_org, prs, from, to, &mut out)?;
     Ok(out)
@@ -39,11 +46,16 @@ fn fetch_range(
         if is_org { "org" } else { "user" },
         if prs { "pr" } else { "issue" }
     );
-    let path = format!("/search/issues?q={}&per_page=100&sort=created&order=asc", encode_query(&q));
+    let path = format!(
+        "/search/issues?q={}&per_page=100&sort=created&order=asc",
+        encode_query(&q)
+    );
     let first = client.get(&path)?;
     if first.status == 422 {
         // GitHub answers 422 when the owner has no searchable repositories.
-        client.ui.debug(&format!("search for '{q}' returned 422; counting nothing"));
+        client
+            .ui
+            .debug(&format!("search for '{q}' returned 422; counting nothing"));
         return Ok(());
     }
     if first.status != 200 {
@@ -52,7 +64,9 @@ fn fetch_range(
     let total = first.body["total_count"].as_u64().unwrap_or(0);
     if total > SEARCH_CAP && from < to {
         let mid = from + Duration::days((to - from).num_days() / 2);
-        client.ui.debug(&format!("'{q}' has {total} results; splitting at {mid}"));
+        client
+            .ui
+            .debug(&format!("'{q}' has {total} results; splitting at {mid}"));
         fetch_range(client, owner, is_org, prs, from, mid, out)?;
         return fetch_range(client, owner, is_org, prs, mid + Duration::days(1), to, out);
     }
@@ -63,7 +77,9 @@ fn fetch_range(
         ));
     }
     if first.body["incomplete_results"].as_bool() == Some(true) {
-        client.ui.warn(&format!("GitHub search timed out for '{q}'; counts may be slightly low"));
+        client.ui.warn(&format!(
+            "GitHub search timed out for '{q}'; counts may be slightly low"
+        ));
     }
     collect(&first.body, prs, out);
     let mut next = first.next;
@@ -79,9 +95,13 @@ fn fetch_range(
 }
 
 fn collect(body: &Value, prs: bool, out: &mut Vec<Item>) {
-    let Some(items) = body["items"].as_array() else { return };
+    let Some(items) = body["items"].as_array() else {
+        return;
+    };
     for it in items {
-        let Some(login) = it["user"]["login"].as_str() else { continue };
+        let Some(login) = it["user"]["login"].as_str() else {
+            continue;
+        };
         let created = it["created_at"]
             .as_str()
             .and_then(|s| s.get(..10))

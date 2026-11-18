@@ -26,7 +26,11 @@ pub struct AppError {
 
 impl AppError {
     fn new(kind: Kind, msg: impl Into<String>) -> Self {
-        AppError { kind, msg: msg.into(), hint: None }
+        AppError {
+            kind,
+            msg: msg.into(),
+            hint: None,
+        }
     }
     pub fn runtime(msg: impl Into<String>) -> Self {
         Self::new(Kind::Runtime, msg)

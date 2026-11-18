@@ -28,7 +28,7 @@ or writes a self-contained HTML report.",
 )]
 pub struct Cli {
     /// Organization or user: https://github.com/Montimage, github.com/Montimage, or Montimage
-    #[arg(value_name = "ORG", required = true)]
+    #[arg(value_name = "ORG", required_unless_present = "completions")]
     pub orgs: Vec<String>,
 
     /// Also write a self-contained HTML report [default: devstats-report.html]. Put it after the ORGs, or use --html=PATH
@@ -84,6 +84,14 @@ pub struct Cli {
     #[arg(long, value_name = "URL")]
     pub api_url: Option<String>,
 
+    /// Always fetch fresh data (skip the 1-hour response cache in ~/.cache/devstats)
+    #[arg(long)]
+    pub no_cache: bool,
+
+    /// Print a shell completion script and exit (bash, zsh, fish, elvish, powershell)
+    #[arg(long, value_name = "SHELL", hide = true)]
+    pub completions: Option<clap_complete::Shell>,
+
     /// Disable colors (also honored: NO_COLOR)
     #[arg(long)]
     pub no_color: bool,
@@ -135,5 +143,6 @@ impl SortKey {
 }
 
 fn parse_date(s: &str) -> Result<NaiveDate, String> {
-    NaiveDate::parse_from_str(s, "%Y-%m-%d").map_err(|_| format!("'{s}' is not a date; use YYYY-MM-DD, e.g. 2025-01-31"))
+    NaiveDate::parse_from_str(s, "%Y-%m-%d")
+        .map_err(|_| format!("'{s}' is not a date; use YYYY-MM-DD, e.g. 2025-01-31"))
 }

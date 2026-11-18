@@ -36,7 +36,14 @@ impl Reporter {
     pub fn new(mode: Mode, verbose: bool, quiet: bool) -> Self {
         // A real TTY only, whatever FORCE_COLOR says.
         let progress_on = !quiet && std::io::stderr().is_terminal();
-        Reporter { verbose, quiet, mode, progress_on, start: Instant::now(), state: Mutex::new(Progress::default()) }
+        Reporter {
+            verbose,
+            quiet,
+            mode,
+            progress_on,
+            start: Instant::now(),
+            state: Mutex::new(Progress::default()),
+        }
     }
 
     /// Print one line on stderr, keeping the progress line below it.
@@ -50,29 +57,48 @@ impl Reporter {
 
     pub fn debug(&self, msg: &str) {
         if self.verbose {
-            self.line(&paint(&self.mode, Role::Dim, &format!("{} {msg}", self.mode.g("·", "-"))));
+            self.line(&paint(
+                &self.mode,
+                Role::Dim,
+                &format!("{} {msg}", self.mode.g("·", "-")),
+            ));
         }
     }
 
     pub fn warn(&self, msg: &str) {
         if !self.quiet {
-            self.line(&format!("{} {} {msg}", status_symbol(&self.mode, Role::Mid), paint(&self.mode, Role::Title, "warning:")));
+            self.line(&format!(
+                "{} {} {msg}",
+                status_symbol(&self.mode, Role::Mid),
+                paint(&self.mode, Role::Title, "warning:")
+            ));
         }
     }
 
     pub fn info(&self, msg: &str) {
         if !self.quiet {
-            self.line(&format!("{} {msg}", paint(&self.mode, Role::Low, self.mode.g("✓", "+"))));
+            self.line(&format!(
+                "{} {msg}",
+                paint(&self.mode, Role::Low, self.mode.g("✓", "+"))
+            ));
         }
     }
 
     pub fn error(&self, e: &AppError) {
         self.clear();
-        let label = paint_bold(&self.mode, Role::High, &format!("{} error:", self.mode.g("✗", "x")));
+        let label = paint_bold(
+            &self.mode,
+            Role::High,
+            &format!("{} error:", self.mode.g("✗", "x")),
+        );
         let mut err = std::io::stderr().lock();
         let _ = writeln!(err, "{label} {}", e.msg);
         if let Some(h) = &e.hint {
-            let _ = writeln!(err, "  {}", paint(&self.mode, Role::Dim, &format!("hint: {h}")));
+            let _ = writeln!(
+                err,
+                "  {}",
+                paint(&self.mode, Role::Dim, &format!("hint: {h}"))
+            );
         }
     }
 
@@ -129,13 +155,15 @@ impl Reporter {
         let m = &self.mode;
         let secs = format!("{:.1}s", self.start.elapsed().as_secs_f64());
         let mut l = Line::new();
-        l.push(m, Role::Title, &truncate(&st.label, 30, m.unicode())).pad(2);
+        l.push(m, Role::Title, &truncate(&st.label, 30, m.unicode()))
+            .pad(2);
         match (&st.note, st.total) {
             (Some(note), _) => {
                 l.push(m, Role::Text, note);
             }
             (None, Some(t)) if t > 0 => {
-                l.append(&meter(m, st.done as f64 * 100.0 / t as f64, 12)).pad(2);
+                l.append(&meter(m, st.done as f64 * 100.0 / t as f64, 12))
+                    .pad(2);
                 l.push(m, Role::Text, &format!("{}/{t} repos", st.done));
             }
             (None, _) => {
@@ -145,7 +173,15 @@ impl Reporter {
         l.push(m, Role::Dim, &format!(" {} {secs}", m.g("·", "-")));
         if l.width + 1 >= m.width {
             // Too narrow for the full line: fall back to the short form.
-            l = Line::of(m, Role::Text, &truncate(&format!("{} {}/{} {secs}", st.label, st.done, st.total.unwrap_or(0)), m.width.saturating_sub(1), m.unicode()));
+            l = Line::of(
+                m,
+                Role::Text,
+                &truncate(
+                    &format!("{} {}/{} {secs}", st.label, st.done, st.total.unwrap_or(0)),
+                    m.width.saturating_sub(1),
+                    m.unicode(),
+                ),
+            );
         }
         let pad = st.shown.saturating_sub(l.width);
         let _ = write!(err, "\r{}{}", l.text, " ".repeat(pad));

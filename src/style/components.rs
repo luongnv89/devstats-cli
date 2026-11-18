@@ -39,20 +39,52 @@ impl Line {
 
 /// `╭─┐title┌────╮` (ASCII `+-[title]----+`), exactly `w` cells wide.
 pub fn box_top(mode: &Mode, title: &str, w: usize, border: u8) -> String {
-    notch_line(mode, title, w, border, mode.g("╭", "+"), mode.g("╮", "+"), mode.g("┐", "["), mode.g("┌", "]"))
+    notch_line(
+        mode,
+        title,
+        w,
+        border,
+        mode.g("╭", "+"),
+        mode.g("╮", "+"),
+        mode.g("┐", "["),
+        mode.g("┌", "]"),
+    )
 }
 
 /// `╰─┘footer└────╯`, or a plain bottom line when `footer` is empty.
 pub fn box_bottom(mode: &Mode, footer: &str, w: usize, border: u8) -> String {
-    notch_line(mode, footer, w, border, mode.g("╰", "+"), mode.g("╯", "+"), mode.g("┘", "["), mode.g("└", "]"))
+    notch_line(
+        mode,
+        footer,
+        w,
+        border,
+        mode.g("╰", "+"),
+        mode.g("╯", "+"),
+        mode.g("┘", "["),
+        mode.g("└", "]"),
+    )
 }
 
 #[allow(clippy::too_many_arguments)]
-fn notch_line(mode: &Mode, label: &str, w: usize, border: u8, left: &str, right: &str, open: &str, close: &str) -> String {
+fn notch_line(
+    mode: &Mode,
+    label: &str,
+    w: usize,
+    border: u8,
+    left: &str,
+    right: &str,
+    open: &str,
+    close: &str,
+) -> String {
     let b = Role::Border(border);
     let h = mode.g("─", "-");
     if label.is_empty() {
-        return format!("{}{}{}", paint(mode, b, left), paint(mode, b, &h.repeat(w.saturating_sub(2))), paint(mode, b, right));
+        return format!(
+            "{}{}{}",
+            paint(mode, b, left),
+            paint(mode, b, &h.repeat(w.saturating_sub(2))),
+            paint(mode, b, right)
+        );
     }
     let label = truncate(label, w.saturating_sub(6), mode.unicode());
     let fill = w.saturating_sub(5 + width(&label));
@@ -74,7 +106,14 @@ pub fn box_row(mode: &Mode, content: &Line, w: usize, border: u8) -> String {
 }
 
 /// A whole box: top with title, rows, bottom with footer.
-pub fn boxed(mode: &Mode, title: &str, rows: &[Line], footer: &str, w: usize, border: u8) -> String {
+pub fn boxed(
+    mode: &Mode,
+    title: &str,
+    rows: &[Line],
+    footer: &str,
+    w: usize,
+    border: u8,
+) -> String {
     let mut out = box_top(mode, title, w, border);
     out.push('\n');
     for r in rows {
@@ -102,7 +141,10 @@ pub fn meter(mode: &Mode, value: f64, cells: usize) -> Line {
         }
     }
     // Always one space before the value: ` 50%`, `  5%`, ` 100%`.
-    let pct = format!(" {:>3}", format!("{}%", round_half_up(value.clamp(0.0, 999.0))));
+    let pct = format!(
+        " {:>3}",
+        format!("{}%", round_half_up(value.clamp(0.0, 999.0)))
+    );
     l.push(mode, Role::Text, &pct);
     l
 }
@@ -124,11 +166,21 @@ pub fn sparkline(mode: &Mode, samples: &[u64], max: Option<u64>) -> Line {
         return l;
     }
     let max = max.unwrap_or_else(|| samples.iter().copied().max().unwrap_or(0));
-    let level = |s: u64| if max == 0 { 0 } else { round_half_up(s as f64 / max as f64 * 4.0).clamp(0, 4) as usize };
+    let level = |s: u64| {
+        if max == 0 {
+            0
+        } else {
+            round_half_up(s as f64 / max as f64 * 4.0).clamp(0, 4) as usize
+        }
+    };
     for pair in samples.chunks(2) {
         let (a, b) = (pair[0], *pair.get(1).unwrap_or(&pair[0]));
         let cell = BRAILLE_UP[level(a)][level(b)];
-        let pos = if max == 0 { 0 } else { (a.max(b) as f64 / max as f64 * 100.0).min(100.0) as u8 };
+        let pos = if max == 0 {
+            0
+        } else {
+            (a.max(b) as f64 / max as f64 * 100.0).min(100.0) as u8
+        };
         l.push(mode, Role::Grad(pos), &cell.to_string());
     }
     l
@@ -156,7 +208,12 @@ pub struct Col {
 
 impl Col {
     pub fn new(header: &str, right: bool, drop: u8) -> Self {
-        Col { header: header.to_string(), right, drop, shrink: false }
+        Col {
+            header: header.to_string(),
+            right,
+            drop,
+            shrink: false,
+        }
     }
     pub fn shrinkable(mut self) -> Self {
         self.shrink = true;
@@ -178,11 +235,23 @@ pub fn table(
     let natural: Vec<usize> = cols
         .iter()
         .enumerate()
-        .map(|(i, c)| rows.iter().map(|r| r[i].width).max().unwrap_or(0).max(width(&c.header)))
+        .map(|(i, c)| {
+            rows.iter()
+                .map(|r| r[i].width)
+                .max()
+                .unwrap_or(0)
+                .max(width(&c.header))
+        })
         .collect();
     let total = |keep: &[bool], widths: &[usize]| -> usize {
         let n = keep.iter().filter(|k| **k).count();
-        widths.iter().zip(keep).filter(|(_, k)| **k).map(|(w, _)| *w).sum::<usize>() + gap * n.saturating_sub(1)
+        widths
+            .iter()
+            .zip(keep)
+            .filter(|(_, k)| **k)
+            .map(|(w, _)| *w)
+            .sum::<usize>()
+            + gap * n.saturating_sub(1)
     };
     let mut widths = natural.clone();
     while total(&keep, &widths) > max_w {
@@ -229,7 +298,11 @@ pub fn table(
                 line.pad(gap);
             }
             first = false;
-            let cell = if row[i].width > widths[i] { shrink(r, i, widths[i]) } else { row[i].clone() };
+            let cell = if row[i].width > widths[i] {
+                shrink(r, i, widths[i])
+            } else {
+                row[i].clone()
+            };
             let pad = widths[i].saturating_sub(cell.width);
             if c.right {
                 line.pad(pad).append(&cell);
@@ -253,7 +326,14 @@ mod tests {
 
     #[test]
     fn styled_16_unicode_box_has_escapes_and_notch() {
-        let s = boxed(&uni(Tier::Ansi16), "devstats", &[Line::of(&uni(Tier::Ansi16), Role::Text, "hi")], "", 30, 0);
+        let s = boxed(
+            &uni(Tier::Ansi16),
+            "devstats",
+            &[Line::of(&uni(Tier::Ansi16), Role::Text, "hi")],
+            "",
+            30,
+            0,
+        );
         assert!(s.contains("\x1b["));
         assert!(s.contains("╭─┐"));
     }
@@ -261,7 +341,14 @@ mod tests {
     #[test]
     fn box_lines_have_exact_width() {
         let m = uni(Tier::None);
-        let s = boxed(&m, "title", &[Line::of(&m, Role::Text, "row")], "foot", 24, 0);
+        let s = boxed(
+            &m,
+            "title",
+            &[Line::of(&m, Role::Text, "row")],
+            "foot",
+            24,
+            0,
+        );
         for line in s.lines() {
             assert_eq!(width(line), 24, "line: {line}");
         }
@@ -322,7 +409,10 @@ mod tests {
         let wide = table(&m, &cols, &rows, 80, &shrink);
         assert_eq!(wide[0].text, "name       a  extra  more");
         let narrow = table(&m, &cols, &rows, 18, &shrink);
-        assert_eq!(narrow[0].text, "name       a  more", "extra (drop 2) goes first");
+        assert_eq!(
+            narrow[0].text, "name       a  more",
+            "extra (drop 2) goes first"
+        );
         let tiny = table(&m, &cols, &rows, 8, &shrink);
         assert_eq!(tiny[1].text, "alex…  1");
     }
