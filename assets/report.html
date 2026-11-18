@@ -563,7 +563,9 @@ footer .sig { font-family: var(--mono); }
     listing_failed: "private repos not included: the full repository listing failed",
     user_account: "user account: public repos only",
   };
-  const privateLine = (o) => o.private_access === "included"
+  const privateLine = (o) => o.private_access === "included" && !o.private_repos
+    ? "private repos: none scanned (forks/archived skipped)"
+    : o.private_access === "included"
     ? fmt(o.private_repos) + " private repo" + (o.private_repos === 1 ? "" : "s") + " included"
     : PRIVATE_WHY[o.private_access] || "public repos only";
   $("orgs").append(...D.orgs.map((o) => {

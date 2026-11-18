@@ -209,41 +209,37 @@ fn summary_parts(r: &Report, mode: &Mode) -> (String, Vec<Line>, String) {
         .map(|o| sanitize(&o.login, false))
         .collect();
     let footer = if public_only.len() == r.orgs.len() && !public_only.is_empty() {
-        format!("{date}{}{rest}{}public repos only", sep(mode), sep(mode))
+        let all = "public repos only";
+        fit_footer(mode, date, &rest, all, all)
     } else if !public_only.is_empty() {
-        disclosure_footer(mode, date, &rest, &public_only, r.orgs.len())
+        let named = format!("private repos not included for {}", public_only.join(", "));
+        let counted = format!(
+            "private repos not included for {} of {} orgs",
+            public_only.len(),
+            r.orgs.len()
+        );
+        fit_footer(mode, date, &rest, &named, &counted)
     } else {
         format!("{date}{}{rest}", sep(mode))
     };
     (title, items, footer)
 }
 
-/// The summary footer when some (not all) orgs are scanned without private repos.
-/// The box truncates its footer to the terminal width minus 6, so the disclosure must
-/// stay visible: name the orgs if that fits, else count them, then drop the date, and
-/// as a last resort put the disclosure first.
-fn disclosure_footer(
-    mode: &Mode,
-    date: &str,
-    rest: &str,
-    public_only: &[String],
-    orgs: usize,
-) -> String {
+/// A summary footer ending in a private-repo disclosure (`long`, or the shorter
+/// `short`). The box truncates its footer to the terminal width minus 6, so the
+/// disclosure must stay visible: use `long` if it fits, else `short`, then drop the
+/// date, and as a last resort put the disclosure first.
+fn fit_footer(mode: &Mode, date: &str, rest: &str, long: &str, short: &str) -> String {
     let max = mode.width.saturating_sub(6);
     let s = sep(mode);
-    let named = format!("private repos not included for {}", public_only.join(", "));
-    let counted = format!(
-        "private repos not included for {} of {orgs} orgs",
-        public_only.len()
-    );
     [
-        format!("{date}{s}{rest}{s}{named}"),
-        format!("{date}{s}{rest}{s}{counted}"),
-        format!("{rest}{s}{counted}"),
+        format!("{date}{s}{rest}{s}{long}"),
+        format!("{date}{s}{rest}{s}{short}"),
+        format!("{rest}{s}{short}"),
     ]
     .into_iter()
     .find(|f| width(f) <= max)
-    .unwrap_or_else(|| format!("{counted}{s}{rest}"))
+    .unwrap_or_else(|| format!("{short}{s}{rest}"))
 }
 
 fn join((v, u): (String, &'static str)) -> String {
@@ -420,6 +416,36 @@ mod tests {
                 "2026-11-18 · 2025-01-01 → 2025-12-31 · 2 repos still computing · \
                  private repos not included for acme-security-research"
             ),
+            "{out}"
+        );
+    }
+
+    #[test]
+    fn public_only_disclosure_survives_a_narrow_terminal() {
+        let mut r = report(vec![org("acme", PrivateAccess::NoToken)]);
+        r.orgs[0].incomplete_repos = vec!["a".into(), "b".into()];
+        for w in [80, 60] {
+            let mode = Mode::styled(Tier::None, Glyphs::Unicode, w);
+            let out = render(&r, &mode, false);
+            let footer = footer_line(&out);
+            assert!(width(footer) <= w, "{out}");
+            assert!(footer.contains("public repos only"), "{footer}");
+            // At 60 columns the disclosure leads and only the range after it is cut.
+            assert!(w == 60 || !footer.contains('…'), "{footer}");
+        }
+        r.orgs[0].incomplete_repos.clear();
+        let mode = Mode::styled(Tier::None, Glyphs::Unicode, 60);
+        let footer = render(&r, &mode, false);
+        let footer = footer_line(&footer);
+        assert!(!footer.contains('…'), "{footer}");
+        assert!(
+            footer.contains("2025-01-01 → 2025-12-31 · public repos only"),
+            "{footer}"
+        );
+        let wide = Mode::styled(Tier::None, Glyphs::Unicode, 200);
+        let out = render(&r, &wide, false);
+        assert!(
+            footer_line(&out).contains("2026-11-18 · 2025-01-01 → 2025-12-31 · public repos only"),
             "{out}"
         );
     }
