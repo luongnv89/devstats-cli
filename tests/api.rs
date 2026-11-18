@@ -446,3 +446,315 @@ fn second_run_is_served_from_the_cache_unless_no_cache() {
     owner.assert();
     assert!(std::fs::read_dir(cache.path()).unwrap().count() >= 5);
 }
+
+const TOKEN: &str = "s3cret-test-token";
+
+/// With `TOKEN`, acme's full listing also has the private repo `vault`
+/// (alice +7 commits, carol 4). Register it before `mock_acme`.
+fn mock_private_vault(server: &mut mockito::ServerGuard) -> Vec<mockito::Mock> {
+    let base = server.url();
+    vec![
+        server
+            .mock("GET", "/orgs/acme/repos?type=all&per_page=100")
+            .match_header("authorization", format!("Bearer {TOKEN}").as_str())
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_header("link", &format!("<{base}/orgs/acme/repos?type=all&per_page=100&page=2>; rel=\"next\""))
+            .with_body(json!([
+                {"name": "api", "fork": false, "archived": false, "private": false},
+                {"name": "fork1", "fork": true, "archived": false, "private": false},
+                {"name": "vault", "fork": false, "archived": false, "private": true, "visibility": "private"},
+            ]).to_string())
+            .expect(1)
+            .create(),
+        json_mock(server, "/repos/acme/vault/stats/contributors", 200, json!([
+            author("alice", &[(1, 7, 70, 7)]),
+            author("carol", &[(2, 4, 40, 4)]),
+        ])),
+    ]
+}
+
+fn notes(r: &Value) -> Vec<String> {
+    r["notes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|n| n.as_str().unwrap().to_string())
+        .collect()
+}
+
+#[test]
+fn private_repos_the_token_can_read_are_scanned() {
+    let mut server = mockito::Server::new();
+    let private = mock_private_vault(&mut server);
+    let _m = mock_acme(&mut server);
+    let r = run_json(&server, &["--token", TOKEN]);
+    private[0].assert();
+    assert_eq!(r["totals"]["repos"], 3, "api, web and the private vault");
+    assert_eq!(r["totals"]["repos_private"], 1);
+    assert_eq!(r["totals"]["commits"], 28);
+    assert_eq!(r["contributors"][0]["login"], "alice");
+    assert_eq!(r["contributors"][0]["commits"], 19);
+    assert_eq!(r["contributors"][0]["repos"], 3);
+    assert!(r["contributors"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|c| c["login"] == "carol" && c["commits"] == 4));
+    let org = &r["orgs"][0];
+    assert_eq!(org["private_access"], "included");
+    assert_eq!(org["private_repos"], 1);
+    assert_eq!(org["totals"]["repos_private"], 1);
+    assert!(!notes(&r).iter().any(|n| n.contains("not included")));
+}
+
+#[test]
+fn private_repos_reach_tsv_table_and_html() {
+    let mut server = mockito::Server::new();
+    let _p = mock_private_vault(&mut server);
+    let _m = mock_acme(&mut server);
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("out.html");
+    devstats()
+        .args([
+            "acme",
+            "--token",
+            TOKEN,
+            "--format",
+            "tsv",
+            "--api-url",
+            &server.url(),
+        ])
+        .arg(format!("--html={}", path.display()))
+        .assert()
+        .success()
+        .stdout(
+            "alice\t19\t1090\t109\t0\t0\t0\t3\tacme\n\
+             bob\t5\t50\t5\t0\t0\t0\t1\tacme\n\
+             carol\t4\t40\t4\t0\t0\t0\t1\tacme\n",
+        );
+    let html = std::fs::read_to_string(&path).unwrap();
+    let start = html.find(r#"id="devstats-data">"#).unwrap() + r#"id="devstats-data">"#.len();
+    let end = start + html[start..].find("</script>").unwrap();
+    let data: Value = serde_json::from_str(&html[start..end]).unwrap();
+    assert_eq!(data["totals"]["repos_private"], 1);
+    assert_eq!(data["orgs"][0]["private_access"], "included");
+    assert_eq!(data["orgs"][0]["private_repos"], 1);
+
+    let mut server = mockito::Server::new();
+    let _p = mock_private_vault(&mut server);
+    let _m = mock_acme(&mut server);
+    let out = devstats()
+        .env("FORCE_COLOR", "1")
+        .env("NO_COLOR", "1")
+        .env("COLUMNS", "200")
+        .args(["acme", "--token", TOKEN, "--api-url", &server.url()])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let table = String::from_utf8(out).unwrap();
+    assert!(table.contains("3 repos (1 private)"), "{table}");
+    assert!(table.contains("carol"), "{table}");
+    assert!(!table.contains("public repos only"), "{table}");
+}
+
+#[test]
+fn tokenless_run_reports_public_repos_only() {
+    let mut server = mockito::Server::new();
+    let _m = mock_acme(&mut server);
+    let mut cmd = devstats();
+    cmd.args([
+        "acme",
+        "--quiet",
+        "--format",
+        "json",
+        "--api-url",
+        &server.url(),
+    ]);
+    let out = cmd
+        .assert()
+        .success()
+        .stderr("")
+        .get_output()
+        .stdout
+        .clone();
+    let r: Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(r["orgs"][0]["private_access"], "no_token");
+    assert_eq!(r["totals"]["repos_private"], 0);
+    assert!(
+        notes(&r).contains(&"acme: private repositories not included (no token).".to_string()),
+        "{:?}",
+        notes(&r)
+    );
+    let out = devstats()
+        .env("FORCE_COLOR", "1")
+        .env("NO_COLOR", "1")
+        .env("COLUMNS", "200")
+        .args(["acme", "--quiet", "--api-url", &server.url()])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let table = String::from_utf8(out).unwrap();
+    assert!(table.contains("all time · public repos only"), "{table}");
+}
+
+#[test]
+fn token_without_private_access_reports_none_visible() {
+    let mut server = mockito::Server::new();
+    let _m = mock_acme(&mut server);
+    let mut cmd = devstats();
+    cmd.args([
+        "acme",
+        "--token",
+        TOKEN,
+        "--format",
+        "json",
+        "--api-url",
+        &server.url(),
+    ]);
+    let out = cmd
+        .assert()
+        .success()
+        .stderr(predicate::str::contains(
+            "acme: no private repositories visible to this token",
+        ))
+        .get_output()
+        .stdout
+        .clone();
+    let r: Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(r["orgs"][0]["private_access"], "none_visible");
+    assert_eq!(r["totals"]["repos"], 2);
+    assert!(notes(&r).contains(
+        &"acme: private repositories not included (none visible to this token).".to_string()
+    ));
+}
+
+#[test]
+fn failed_full_listing_falls_back_to_public_repos() {
+    let mut server = mockito::Server::new();
+    let denied = server
+        .mock("GET", "/orgs/acme/repos?type=all&per_page=100")
+        .with_status(403)
+        .with_header("content-type", "application/json")
+        .with_body(r#"{"message":"Resource protected by organization SAML enforcement."}"#)
+        .expect(1)
+        .create();
+    let public = server
+        .mock("GET", "/orgs/acme/repos?type=public&per_page=100")
+        .with_status(200)
+        .with_header("content-type", "application/json")
+        .with_body(
+            json!([
+                {"name": "api", "fork": false, "archived": false},
+                {"name": "fork1", "fork": true, "archived": false},
+                {"name": "web", "fork": false, "archived": true},
+            ])
+            .to_string(),
+        )
+        .expect(1)
+        .create();
+    let _m = mock_acme(&mut server);
+    let mut cmd = devstats();
+    cmd.args([
+        "acme",
+        "--token",
+        TOKEN,
+        "--format",
+        "json",
+        "--api-url",
+        &server.url(),
+    ]);
+    let out = cmd
+        .assert()
+        .success()
+        .stderr(
+            predicate::str::contains("acme: the full repository listing failed (HTTP 403)").and(
+                predicate::str::contains("only public repositories are scanned"),
+            ),
+        )
+        .get_output()
+        .stdout
+        .clone();
+    denied.assert();
+    public.assert();
+    let r: Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(r["orgs"][0]["private_access"], "listing_failed");
+    assert_eq!(r["totals"]["repos"], 2);
+    assert_eq!(r["contributors"][0]["commits"], 12);
+    assert!(notes(&r).iter().any(|n| n
+        == "acme: private repositories not included (the full repository listing failed with HTTP 403; public repositories only)."));
+}
+
+#[test]
+fn rate_limit_on_the_listing_still_aborts() {
+    let mut server = mockito::Server::new();
+    let far = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs()
+        + 3600;
+    let _limited = server
+        .mock("GET", "/orgs/acme/repos?type=all&per_page=100")
+        .with_status(403)
+        .with_header("x-ratelimit-remaining", "0")
+        .with_header("x-ratelimit-reset", &far.to_string())
+        .with_body(r#"{"message":"API rate limit exceeded"}"#)
+        .create();
+    let _m = mock_acme(&mut server);
+    devstats()
+        .args(["acme", "--api-url", &server.url()])
+        .assert()
+        .code(1)
+        .stderr(predicate::str::contains("rate limit exhausted"));
+}
+
+#[test]
+fn cache_is_not_shared_between_tokenless_and_token_runs() {
+    let mut server = mockito::Server::new();
+    let anon_listing = server
+        .mock("GET", "/orgs/acme/repos?type=all&per_page=100")
+        .match_header("authorization", mockito::Matcher::Missing)
+        .with_status(200)
+        .with_header("content-type", "application/json")
+        .with_body(json!([{"name": "api", "fork": false, "archived": false}]).to_string())
+        .expect(1)
+        .create();
+    let token_listing = mock_private_vault(&mut server);
+    let _m = mock_acme(&mut server);
+    let cache = tempfile::tempdir().unwrap();
+    let run = |token: Option<&str>| -> Value {
+        let mut cmd = devstats();
+        cmd.env("DEVSTATS_CACHE_DIR", cache.path()).args([
+            "acme",
+            "--format",
+            "json",
+            "--api-url",
+            &server.url(),
+        ]);
+        if let Some(t) = token {
+            cmd.args(["--token", t]);
+        }
+        serde_json::from_slice(&cmd.assert().success().get_output().stdout).unwrap()
+    };
+    let anon = run(None);
+    assert_eq!(anon["totals"]["repos"], 1);
+    assert_eq!(anon["orgs"][0]["private_access"], "no_token");
+    let with_token = run(Some(TOKEN));
+    anon_listing.assert();
+    token_listing[0].assert();
+    assert_eq!(
+        with_token["totals"]["repos_private"], 1,
+        "not the tokenless listing"
+    );
+    assert_eq!(with_token["orgs"][0]["private_access"], "included");
+    for entry in std::fs::read_dir(cache.path()).unwrap() {
+        let path = entry.unwrap().path();
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(!text.contains(TOKEN), "token written to {}", path.display());
+        assert!(!path.to_string_lossy().contains(TOKEN));
+    }
+}
