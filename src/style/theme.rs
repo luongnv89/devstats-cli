@@ -22,6 +22,8 @@ pub enum Role {
     High,
     /// Gradient position 0-100 (low → mid → high).
     Grad(u8),
+    /// The highest value in a table column (bold cyan, a color no other cell uses).
+    Lead,
 }
 
 const BORDERS: [(u8, u8, u8); 4] = [
@@ -40,6 +42,7 @@ const ACCENT: (u8, u8, u8) = (0xb5, 0x40, 0x40);
 const LOW: (u8, u8, u8) = (0x77, 0xca, 0x9b);
 const MID: (u8, u8, u8) = (0xcb, 0xc0, 0x6c);
 const HIGH: (u8, u8, u8) = (0xdc, 0x4c, 0x4c);
+const LEAD: (u8, u8, u8) = (0x56, 0xc8, 0xe8);
 
 /// Gradient color at position 0-100: linear low→mid over 0-50, mid→high over 50-100.
 pub fn gradient(pos: u8) -> (u8, u8, u8) {
@@ -107,6 +110,9 @@ pub fn style(role: Role, tier: Tier) -> Style {
         Role::Mid => style(Role::Grad(50), tier),
         Role::High => style(Role::Grad(100), tier),
         Role::Grad(p) => s.fg_color(rgb(tier, gradient(p), grad16(p.min(100)))),
+        Role::Lead => s
+            .fg_color(rgb(tier, LEAD, AnsiColor::BrightCyan))
+            .effects(Effects::BOLD),
     }
 }
 
@@ -174,5 +180,30 @@ mod tests {
         assert_eq!(paint(&m, Role::Border(0), "─"), "\x1b[32m─\x1b[0m");
         assert!(paint(&m, Role::Grad(80), "■").starts_with("\x1b[91m"));
         assert!(paint(&m, Role::Dim, "x").starts_with("\x1b[2m"));
+    }
+
+    #[test]
+    fn lead_has_its_own_color_in_every_tier() {
+        use crate::style::Glyphs;
+        for tier in [Tier::Ansi16, Tier::Ansi256, Tier::TrueColor] {
+            let lead = style(Role::Lead, tier);
+            assert!(lead.get_fg_color().is_some(), "{tier:?}");
+            assert!(lead.get_effects().contains(Effects::BOLD), "{tier:?}");
+            let others = [Role::Title, Role::Accent, Role::Low, Role::Mid, Role::High]
+                .into_iter()
+                .chain((0..=100).map(Role::Grad))
+                .chain((0..4).map(Role::Border));
+            for other in others {
+                assert_ne!(
+                    style(other, tier).get_fg_color(),
+                    lead.get_fg_color(),
+                    "{tier:?} {other:?}"
+                );
+            }
+        }
+        let m = Mode::styled(Tier::Ansi16, Glyphs::Unicode, 80);
+        assert!(paint(&m, Role::Lead, "9").contains("\x1b[96m"));
+        let none = Mode::styled(Tier::None, Glyphs::Unicode, 80);
+        assert_eq!(paint(&none, Role::Lead, "9"), "9");
     }
 }
