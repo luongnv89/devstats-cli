@@ -1,3 +1,10 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/logo/logo-white.svg">
+    <img src="assets/logo/logo-black.svg" alt="devstats" width="320">
+  </picture>
+</p>
+
 [![CI](https://github.com/luongnv89/devstats-cli/actions/workflows/ci.yml/badge.svg)](https://github.com/luongnv89/devstats-cli/actions/workflows/ci.yml)
 [![license](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 [![rust](https://img.shields.io/badge/rust-1.82%2B-orange)](https://www.rust-lang.org)
