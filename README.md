@@ -8,7 +8,7 @@ terminal table or written to a single self-contained HTML report.
 ╭─┐devstats · Montimage, montimage-projects┌──────────────────────────────────────────────────────╮
 │ 2 orgs   69 repos   57 contributors   6,206 commits   +22.78M / −12.24M lines                    │
 │ 1,474 PRs (1,413 merged)   1,638 issues                                                         │
-╰─┘2026-11-18 · all time└─────────────────────────────────────────────────────────────────────────╯
+╰─┘2026-11-18 · last 1 year (since 2025-11-18)└───────────────────────────────────────────────────╯
 ╭─┐contributors · top 5 by commits┌──────────────────────────────────────────────────────────────╮
 │ #  contributor    commits  +lines  −lines    PRs  merged  issues  repos  share                    │
 │ 1  luongnv89        2,541   2.87M   2.37M  1,366   1,324   1,580     26  ■■■■······  41%          │
@@ -41,7 +41,9 @@ Prebuilt binaries for Linux, macOS, and Windows are attached to each tagged GitH
 ```bash
 devstats https://github.com/Montimage
 devstats https://github.com/Montimage https://github.com/montimage-projects --top 10 --sort lines
-devstats Montimage --since 2025-01-01 --html report.html
+devstats Montimage --period 6m --html report.html
+devstats Montimage --period all
+devstats Montimage --since 2025-01-01 --until 2025-06-30
 devstats Montimage montimage-projects --format json | jq '.contributors[0]'
 devstats Montimage --format tsv --top 0 > contributors.tsv
 ```
@@ -55,7 +57,8 @@ A user account works too. An unknown name prints a warning and the others still 
 | `-f, --format` | `table` | `table`, `json`, or `tsv` on stdout |
 | `-s, --sort` | `commits` | `commits`, `additions`, `deletions`, `lines`, `prs`, `issues`, `repos` |
 | `-n, --top N` | `25` | Show the top N contributors; `0` shows everyone |
-| `--since` / `--until` | all time | Limit to a date range (`YYYY-MM-DD`) |
+| `-p, --period` | `1y` | Preset period ending today: `all`, `1y`, `6m`, `3m`, `1m`, `1w`, `1d` (see below) |
+| `--since` / `--until` | | Limit to an explicit date range (`YYYY-MM-DD`) instead of a preset |
 | `--include-forks` | off | Also scan forked repositories |
 | `--exclude-archived` | off | Skip archived repositories |
 | `--include-bots` | off | Keep `*[bot]` accounts |
@@ -65,6 +68,28 @@ A user account works too. An unknown name prints a warning and the others still 
 | `--api-url` | `https://api.github.com` | For GitHub Enterprise (or `DEVSTATS_API_URL`) |
 | `--no-cache` | off | Skip the 1-hour response cache |
 | `--no-color`, `-q`, `-v` | | No colors (also `NO_COLOR`), quiet, verbose API log |
+
+### Time period
+
+By default devstats reports on the **last 1 year**. Pick another preset with `--period`:
+
+| Preset | Range |
+|---|---|
+| `all` (or `all-time`) | everything, with no start date |
+| `1y` | the last year (default) |
+| `6m` | the last 6 months |
+| `3m` | the last 3 months |
+| `1m` | the last month |
+| `1w` | the last week |
+| `1d` | the last day |
+
+A preset starts on the same calendar date one period ago (a month-end date clamps, so 6
+months before Aug 31 is Feb 28) and ends today. `--since` and `--until` give an explicit
+range instead and cannot be combined with `--period`. With only `--until`, the range has no
+start date, as before. The period appears in the table header and the HTML report, and as
+`range.period` / `range.period_label` in the JSON output. Commits and lines come in weekly
+buckets, so `1w` and `1d` count every week that overlaps the period, while pull requests and
+issues are counted by exact creation date.
 
 ### Token
 
@@ -118,7 +143,7 @@ For a user account, GitHub lists only public repositories, so only those are sca
 |---|---|
 | 0 | success |
 | 1 | runtime error (network, API, rate limit exhausted, unwritable `--html` path) |
-| 2 | usage error (unknown flag, bad value, `--since` after `--until`) |
+| 2 | usage error (unknown flag, bad value, `--since` after `--until`, `--period` with a date flag) |
 | 3 | input error (invalid org name or URL, none of the orgs exist) |
 | 130 | interrupted (Ctrl+C) |
 

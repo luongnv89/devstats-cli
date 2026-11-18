@@ -42,11 +42,15 @@ fn sep(mode: &Mode) -> &'static str {
 }
 
 pub fn range_label(r: &Report, mode: &Mode) -> String {
-    match (&r.range.since, &r.range.until) {
+    let dates = match (&r.range.since, &r.range.until) {
         (None, None) => "all time".into(),
         (Some(s), None) => format!("since {s}"),
         (None, Some(u)) => format!("until {u}"),
         (Some(s), Some(u)) => format!("{s} {} {u}", mode.g("→", "to")),
+    };
+    match r.range.period_label {
+        Some(label) if label != dates => format!("{label} ({dates})"),
+        _ => dates,
     }
 }
 
@@ -364,6 +368,8 @@ mod tests {
             version: "0",
             generated_at: "2026-11-18T10:00:00Z".into(),
             range: Range {
+                period: None,
+                period_label: None,
                 since: Some("2025-01-01".into()),
                 until: Some("2025-12-31".into()),
                 activity_from: "2025-01-05".into(),
@@ -418,6 +424,41 @@ mod tests {
             ),
             "{out}"
         );
+    }
+
+    #[test]
+    fn footer_shows_the_period_and_keeps_the_disclosure() {
+        let mut r = report(vec![org("acme", PrivateAccess::NoToken)]);
+        r.range.period = Some(crate::cli::Period::Year);
+        r.range.period_label = Some("last 1 year");
+        r.range.since = Some("2025-11-18".into());
+        r.range.until = None;
+        let wide = Mode::styled(Tier::None, Glyphs::Unicode, 200);
+        assert!(
+            footer_line(&render(&r, &wide, false))
+                .contains("2026-11-18 · last 1 year (since 2025-11-18) · public repos only"),
+            "{}",
+            render(&r, &wide, false)
+        );
+        for w in [80, 60] {
+            let mode = Mode::styled(Tier::None, Glyphs::Unicode, w);
+            let out = render(&r, &mode, false);
+            let footer = footer_line(&out);
+            assert!(width(footer) <= w, "{out}");
+            assert!(footer.contains("last 1 year"), "{footer}");
+            assert!(footer.contains("public repos only"), "{footer}");
+        }
+        // "all time" is not repeated in brackets.
+        r.range.period = Some(crate::cli::Period::All);
+        r.range.period_label = Some("all time");
+        r.range.since = None;
+        assert_eq!(range_label(&r, &wide), "all time");
+        // --since/--until without a preset keep the plain dates.
+        r.range.period = None;
+        r.range.period_label = None;
+        r.range.since = Some("2025-01-01".into());
+        r.range.until = Some("2025-12-31".into());
+        assert_eq!(range_label(&r, &wide), "2025-01-01 → 2025-12-31");
     }
 
     #[test]

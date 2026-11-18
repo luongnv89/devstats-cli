@@ -317,7 +317,11 @@ fn search_counts_prs_and_issues_and_splits_big_ranges() {
         .with_body(json!({"total_count": 1, "items": [search_item("carol", false)]}).to_string())
         .create();
     let _m = mock_acme(&mut server);
-    let r = run_json(&server, &[]);
+    // `--period all` searches from 2008, exactly as the pre-preset all-time default did.
+    let r = run_json(&server, &["--period", "all"]);
+    assert_eq!(r["range"]["period"], "all");
+    assert_eq!(r["range"]["period_label"], "all time");
+    assert_eq!(r["range"]["since"], Value::Null);
     full.assert();
     halves.assert();
     issues.assert();
@@ -380,6 +384,14 @@ fn html_report_is_self_contained_and_escapes_data() {
     let end = start + html[start..].find("</script>").unwrap();
     let data: Value = serde_json::from_str(&html[start..end]).expect("embedded JSON parses");
     assert_eq!(data["contributors"][0]["login"], "alice");
+    assert_eq!(
+        data["range"]["period_label"], "last 1 year",
+        "the HTML header shows the period"
+    );
+    assert!(
+        html.contains("r.period_label"),
+        "the template renders the period label"
+    );
     assert!(data["contributors"]
         .as_array()
         .unwrap()
@@ -599,7 +611,114 @@ fn tokenless_run_reports_public_repos_only() {
         .stdout
         .clone();
     let table = String::from_utf8(out).unwrap();
-    assert!(table.contains("all time · public repos only"), "{table}");
+    let since = year_ago();
+    assert!(
+        table.contains(&format!("last 1 year (since {since}) · public repos only")),
+        "{table}"
+    );
+}
+
+fn year_ago() -> chrono::NaiveDate {
+    chrono::Utc::now()
+        .date_naive()
+        .checked_sub_months(chrono::Months::new(12))
+        .unwrap()
+}
+
+/// acme plus `old`, whose only commits are 60 weeks back: outside the last year.
+fn mock_acme_with_old_commits(server: &mut mockito::ServerGuard) -> Vec<mockito::Mock> {
+    let mut mocks = vec![json_mock(
+        server,
+        "/repos/acme/api/stats/contributors",
+        200,
+        json!([
+            author("alice", &[(1, 10, 1000, 100)]),
+            author("bob", &[(2, 5, 50, 5)]),
+            author("old", &[(60, 9, 90, 9)]),
+        ]),
+    )];
+    mocks.extend(mock_acme(server));
+    mocks
+}
+
+#[test]
+fn default_period_is_the_last_year() {
+    let mut server = mockito::Server::new();
+    let today = chrono::Utc::now().date_naive();
+    let since = year_ago();
+    let search = server
+        .mock(
+            "GET",
+            mockito::Matcher::Regex(format!(r"created:{since}\.\.{today}&")),
+        )
+        .with_status(200)
+        .with_body(json!({"total_count": 0, "items": []}).to_string())
+        .expect(2)
+        .create();
+    let _m = mock_acme_with_old_commits(&mut server);
+    let r = run_json(&server, &[]);
+    search.assert();
+    assert_eq!(r["range"]["period"], "1y");
+    assert_eq!(r["range"]["period_label"], "last 1 year");
+    assert_eq!(r["range"]["since"], since.to_string());
+    assert_eq!(r["range"]["until"], Value::Null);
+    let logins: Vec<_> = r["contributors"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| c["login"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        logins,
+        ["alice", "bob"],
+        "commits older than a year are left out"
+    );
+    assert_eq!(r["totals"]["commits"], 17);
+}
+
+#[test]
+fn period_all_and_explicit_dates_keep_older_activity() {
+    for extra in [
+        &["--period", "all"][..],
+        &["-p", "all-time"],
+        &["--until", "2099-12-31"],
+    ] {
+        // A fresh server per run: the overriding stats mock answers once.
+        let mut server = mockito::Server::new();
+        let _m = mock_acme_with_old_commits(&mut server);
+        let r = run_json(&server, extra);
+        assert_eq!(r["totals"]["commits"], 26, "{extra:?}");
+        assert_eq!(r["range"]["since"], Value::Null, "{extra:?}");
+        if extra[0] == "--until" {
+            assert_eq!(
+                r["range"]["period"],
+                Value::Null,
+                "explicit dates mean no preset"
+            );
+            assert_eq!(r["range"]["until"], "2099-12-31");
+        }
+    }
+}
+
+#[test]
+fn each_preset_sets_its_start_date() {
+    let mut server = mockito::Server::new();
+    let _m = mock_acme(&mut server);
+    let today = chrono::Utc::now().date_naive();
+    let months = |n| today.checked_sub_months(chrono::Months::new(n)).unwrap();
+    for (p, since, label) in [
+        ("1y", months(12), "last 1 year"),
+        ("6m", months(6), "last 6 months"),
+        ("3m", months(3), "last 3 months"),
+        ("1m", months(1), "last 1 month"),
+        ("1w", today - chrono::Days::new(7), "last 1 week"),
+        ("1d", today - chrono::Days::new(1), "last 1 day"),
+    ] {
+        let r = run_json(&server, &["--period", p]);
+        assert_eq!(r["range"]["period"], p);
+        assert_eq!(r["range"]["period_label"], label);
+        assert_eq!(r["range"]["since"], since.to_string(), "{p}");
+    }
 }
 
 #[test]

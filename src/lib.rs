@@ -15,10 +15,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
-use chrono::Utc;
+use chrono::{NaiveDate, Utc};
 use clap::{CommandFactory, FromArgMatches};
 
-use crate::cli::{Cli, Format};
+use crate::cli::{Cli, Format, Period};
 use crate::error::{AppError, Result};
 use crate::github::{repos, search, stats, Client, DEFAULT_API};
 use crate::model::{OrgData, PrivateAccess};
@@ -82,13 +82,44 @@ fn help_color() -> clap::ColorChoice {
     }
 }
 
-fn execute(cli: &Cli, ui: Arc<Reporter>, out_mode: Mode) -> Result<()> {
-    if let (Some(s), Some(u)) = (cli.since, cli.until) {
-        if s > u {
-            return Err(AppError::usage(format!("--since {s} is after --until {u}"))
-                .hint("swap the two dates"));
+/// The date range to report on, resolved once from --period, --since and --until.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DateRange {
+    pub since: Option<NaiveDate>,
+    pub until: Option<NaiveDate>,
+    /// The preset in effect; `None` when the range comes from --since/--until.
+    pub period: Option<Period>,
+}
+
+impl DateRange {
+    /// `--period` wins (clap keeps it apart from the date flags); with no flag at
+    /// all the default period applies; otherwise the explicit dates are used as given.
+    pub fn resolve(cli: &Cli, today: NaiveDate) -> Result<Self> {
+        if cli.period.is_some() || (cli.since.is_none() && cli.until.is_none()) {
+            let period = cli.period.unwrap_or(Period::DEFAULT);
+            return Ok(DateRange {
+                since: period.start(today),
+                until: None,
+                period: Some(period),
+            });
         }
+        if let (Some(s), Some(u)) = (cli.since, cli.until) {
+            if s > u {
+                return Err(AppError::usage(format!("--since {s} is after --until {u}"))
+                    .hint("swap the two dates"));
+            }
+        }
+        Ok(DateRange {
+            since: cli.since,
+            until: cli.until,
+            period: None,
+        })
     }
+}
+
+fn execute(cli: &Cli, ui: Arc<Reporter>, out_mode: Mode) -> Result<()> {
+    let today = Utc::now().date_naive();
+    let range = DateRange::resolve(cli, today)?;
     let logins = org::parse_all(&cli.orgs)?;
 
     let api = cli
@@ -122,7 +153,7 @@ fn execute(cli: &Cli, ui: Arc<Reporter>, out_mode: Mode) -> Result<()> {
         let result = (|| {
             let mut data = Vec::new();
             for login in &logins {
-                if let Some(d) = collect_org(&client, login, cli)? {
+                if let Some(d) = collect_org(&client, login, cli, &range, today)? {
                     data.push(d);
                 }
             }
@@ -140,12 +171,13 @@ fn execute(cli: &Cli, ui: Arc<Reporter>, out_mode: Mode) -> Result<()> {
     }
 
     let opts = aggregate::Options {
-        since: cli.since,
-        until: cli.until,
+        since: range.since,
+        until: range.until,
+        period: range.period,
         include_bots: cli.include_bots,
         sort: cli.sort,
         top: cli.top,
-        today: Utc::now().date_naive(),
+        today,
     };
     let report = aggregate::build(&data, &opts);
 
@@ -163,7 +195,13 @@ fn execute(cli: &Cli, ui: Arc<Reporter>, out_mode: Mode) -> Result<()> {
 }
 
 /// Fetch everything for one org. `Ok(None)` (after a warning) when it does not exist.
-fn collect_org(client: &Client, login: &str, cli: &Cli) -> Result<Option<OrgData>> {
+fn collect_org(
+    client: &Client,
+    login: &str,
+    cli: &Cli,
+    range: &DateRange,
+    today: NaiveDate,
+) -> Result<Option<OrgData>> {
     client.ui.progress(login, 0, None);
     let Some(owner) = repos::owner(client, login)? else {
         client
@@ -204,8 +242,8 @@ fn collect_org(client: &Client, login: &str, cli: &Cli) -> Result<Option<OrgData
     }
     client.ui.progress(&owner.login, 0, Some(scanned.len()));
 
-    let from = cli.since.unwrap_or_else(search::epoch);
-    let to = cli.until.unwrap_or_else(|| Utc::now().date_naive());
+    let from = range.since.unwrap_or_else(search::epoch);
+    let to = range.until.unwrap_or(today);
     // Search (rate-limited to 30/min) runs beside the stats workers.
     let (repo_stats, items) = std::thread::scope(|s| {
         let search = s.spawn(|| -> Result<Vec<model::Item>> {
@@ -254,5 +292,52 @@ fn write_stdout(text: &str) -> Result<()> {
             Err(AppError::runtime(format!("cannot write output: {e}")))
         }
         _ => Ok(()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::Parser;
+
+    fn d(s: &str) -> NaiveDate {
+        NaiveDate::parse_from_str(s, "%Y-%m-%d").unwrap()
+    }
+
+    fn resolve(args: &[&str]) -> Result<DateRange> {
+        let cli = Cli::try_parse_from(["devstats", "acme"].iter().chain(args)).unwrap();
+        DateRange::resolve(&cli, d("2026-11-18"))
+    }
+
+    #[test]
+    fn no_flags_means_the_last_year() {
+        let r = resolve(&[]).unwrap();
+        assert_eq!(r.period, Some(Period::Year));
+        assert_eq!(r.since, Some(d("2025-11-18")));
+        assert_eq!(r.until, None);
+    }
+
+    #[test]
+    fn period_all_has_no_start() {
+        let r = resolve(&["--period", "all"]).unwrap();
+        assert_eq!(
+            (r.since, r.until, r.period),
+            (None, None, Some(Period::All))
+        );
+    }
+
+    #[test]
+    fn explicit_dates_skip_the_default_period() {
+        let r = resolve(&["--since", "2025-01-01"]).unwrap();
+        assert_eq!(
+            (r.since, r.until, r.period),
+            (Some(d("2025-01-01")), None, None)
+        );
+        let r = resolve(&["--until", "2025-06-30"]).unwrap();
+        assert_eq!(
+            (r.since, r.until, r.period),
+            (None, Some(d("2025-06-30")), None)
+        );
+        assert!(resolve(&["--since", "2025-02-01", "--until", "2025-01-01"]).is_err());
     }
 }
