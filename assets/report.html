@@ -395,10 +395,16 @@ footer .sig { font-family: var(--mono); }
 
   /* ---------- KPIs ---------- */
   const T = D.totals;
+  const repoLabel = (t) => {
+    const parts = [];
+    if (t.repos_private) parts.push(fmt(t.repos_private) + " private");
+    if (t.repos_skipped) parts.push(fmt(t.repos_skipped) + " skipped");
+    return parts.length ? "repositories (" + parts.join(", ") + ")" : "repositories";
+  };
   const kpi = (v, unit, label) => el("div", { class: "kpi" }, el("div", { class: "v" }, v, unit ? el("small", null, unit) : null), el("div", { class: "l" }, label));
   $("kpis").append(
     kpi(fmt(T.contributors), "", "contributors"),
-    kpi(fmt(T.repos), "", T.repos_skipped ? "repositories (" + fmt(T.repos_skipped) + " skipped)" : "repositories"),
+    kpi(fmt(T.repos), "", repoLabel(T)),
     kpi(short(T.commits), "", "commits"),
     kpi("+" + short(T.additions), "", "lines added · −" + short(T.deletions) + " deleted"),
     kpi(fmt(T.prs), "", "pull requests · " + fmt(T.prs_merged) + " merged"),
@@ -551,6 +557,15 @@ footer .sig { font-family: var(--mono); }
     s.append(svg("path", { class: "spark", d }));
     return s;
   }
+  const PRIVATE_WHY = {
+    no_token: "private repos not included: no token",
+    none_visible: "no private repos visible to this token",
+    listing_failed: "private repos not included: the full repository listing failed",
+    user_account: "user account: public repos only",
+  };
+  const privateLine = (o) => o.private_access === "included"
+    ? fmt(o.private_repos) + " private repo" + (o.private_repos === 1 ? "" : "s") + " included"
+    : PRIVATE_WHY[o.private_access] || "public repos only";
   $("orgs").append(...D.orgs.map((o) => {
     const href = safeUrl(o.html_url);
     const name = href ? el("a", { href, rel: "noopener" }, o.login) : el("span", null, o.login);
@@ -566,6 +581,7 @@ footer .sig { font-family: var(--mono); }
         el("div", null, el("dt", null, "issues"), el("dd", null, fmt(t.issues))),
         el("div", null, el("dt", null, "lines"), el("dd", null, short(t.additions + t.deletions))),
       ),
+      el("div", { class: "muted", style: "font-size:12px" }, privateLine(o)),
       el("div", { class: "muted", style: "font-size:11px" }, "commits, last 52 weeks"),
       sparkline((o.weekly || []).slice(-52).map((p) => p.commits), 240, 30),
       o.incomplete_repos && o.incomplete_repos.length ? el("div", { class: "muted", style: "font-size:12px" }, "▲ stats still computing for " + o.incomplete_repos.length + " repo(s); run devstats again for complete numbers") : null,

@@ -1,6 +1,6 @@
 //! `--format table` on a styled stdout: summary box and contributors table (btop look).
 
-use crate::model::{Contributor, Report};
+use crate::model::{Contributor, PrivateAccess, Report};
 use crate::style::components::{boxed, meter, sparkline, table, Col, Line};
 use crate::style::theme::Role;
 use crate::style::{sanitize, truncate, width, Mode};
@@ -162,7 +162,14 @@ fn summary_parts(r: &Report, mode: &Mode) -> (String, Vec<Line>, String) {
             r.orgs.len().to_string(),
             if r.orgs.len() == 1 { "org" } else { "orgs" }.into(),
         ),
-        (thousands(t.repos as u64), "repos".into()),
+        (
+            thousands(t.repos as u64),
+            if t.repos_private > 0 {
+                format!("repos ({} private)", thousands(t.repos_private as u64))
+            } else {
+                "repos".into()
+            },
+        ),
         (thousands(t.contributors as u64), "contributors".into()),
         (thousands(t.commits), "commits".into()),
         (
@@ -198,6 +205,21 @@ fn summary_parts(r: &Report, mode: &Mode) -> (String, Vec<Line>, String) {
     let incomplete: usize = r.orgs.iter().map(|o| o.incomplete_repos.len()).sum();
     if incomplete > 0 {
         footer.push_str(&format!("{}{incomplete} repos still computing", sep(mode)));
+    }
+    let public_only: Vec<String> = r
+        .orgs
+        .iter()
+        .filter(|o| o.private_access != PrivateAccess::Included)
+        .map(|o| sanitize(&o.login, false))
+        .collect();
+    if public_only.len() == r.orgs.len() && !public_only.is_empty() {
+        footer.push_str(&format!("{}public repos only", sep(mode)));
+    } else if !public_only.is_empty() {
+        footer.push_str(&format!(
+            "{}private repos not included for {}",
+            sep(mode),
+            public_only.join(", ")
+        ));
     }
     (title, items, footer)
 }
