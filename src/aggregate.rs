@@ -5,7 +5,9 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use chrono::{Datelike, NaiveDate, TimeZone, Utc};
 
 use crate::cli::SortKey;
-use crate::model::{Contributor, OrgData, OrgReport, Range, Report, Totals, WeekPoint};
+use crate::model::{
+    Contributor, OrgData, OrgReport, PrivateAccess, Range, Report, Totals, WeekPoint,
+};
 
 pub const WEEK: i64 = 7 * 86_400;
 pub const ACTIVITY_WEEKS: usize = 52;
@@ -105,6 +107,7 @@ fn aggregate<'a>(
             web_base = base.to_string();
         }
         totals.repos += org.repos_scanned.len();
+        totals.repos_private += org.private_repos;
         totals.repos_skipped += org.repos_skipped;
         for repo in &org.stats {
             for author in repo.authors.iter().filter(|a| o.include_bots || !a.is_bot) {
@@ -257,6 +260,8 @@ pub fn build(orgs: &[OrgData], o: &Options) -> Report {
                 avatar_url: org.owner.avatar_url.clone(),
                 html_url: org.owner.html_url.clone(),
                 totals,
+                private_repos: org.private_repos,
+                private_access: org.private_access,
                 incomplete_repos: org
                     .stats
                     .iter()
@@ -269,6 +274,12 @@ pub fn build(orgs: &[OrgData], o: &Options) -> Report {
         })
         .collect();
     let win = Window::new(o);
+    let mut notes: Vec<String> = vec![
+        "Commits and lines come from GitHub's contributor statistics: default branch only, commits linked to a GitHub account only.".into(),
+        "GitHub reports 0 added/deleted lines for repositories with 10,000 or more commits.".into(),
+        "Pull requests and issues are counted by author and creation date, across the repositories of each organization the token can read (public repositories only without a token).".into(),
+    ];
+    notes.extend(orgs.iter().filter_map(private_note));
     Report {
         tool: "devstats",
         version: env!("CARGO_PKG_VERSION"),
@@ -284,12 +295,26 @@ pub fn build(orgs: &[OrgData], o: &Options) -> Report {
         orgs: org_reports,
         contributors: truncate(contributors, o.top),
         weekly,
-        notes: vec![
-            "Commits and lines come from GitHub's contributor statistics: default branch only, commits linked to a GitHub account only.".into(),
-            "GitHub reports 0 added/deleted lines for repositories with 10,000 or more commits.".into(),
-            "Pull requests and issues are counted by author and creation date, across all public repositories of each organization.".into(),
-        ],
+        notes,
     }
+}
+
+/// A note for an organization whose private repositories are not in the scan.
+fn private_note(org: &OrgData) -> Option<String> {
+    let why = match org.private_access {
+        PrivateAccess::Included => return None,
+        PrivateAccess::NoToken => "no token".to_string(),
+        PrivateAccess::NoneVisible => "none visible to this token".to_string(),
+        PrivateAccess::ListingFailed => format!(
+            "the full repository listing failed with HTTP {}; public repositories only",
+            org.listing_status.unwrap_or_default()
+        ),
+        PrivateAccess::UserAccount => "user account: public repositories only".to_string(),
+    };
+    Some(format!(
+        "{}: private repositories not included ({why}).",
+        org.owner.login
+    ))
 }
 
 #[cfg(test)]
@@ -331,6 +356,9 @@ mod tests {
             },
             repos_scanned: repos.iter().map(|(n, _)| n.to_string()).collect(),
             repos_skipped: 0,
+            private_repos: 0,
+            private_access: PrivateAccess::NoneVisible,
+            listing_status: None,
             stats: repos
                 .into_iter()
                 .map(|(n, authors)| RepoStats {
@@ -517,5 +545,49 @@ mod tests {
     fn week_start_is_sunday() {
         assert_eq!(week_label(week_start(d("2026-11-18"))), "2026-11-15");
         assert_eq!(week_label(week_start(d("2026-11-15"))), "2026-11-15");
+    }
+    #[test]
+    fn private_repos_are_totalled_and_missing_access_is_noted() {
+        let mut orgs = fixture();
+        orgs[0].private_repos = 1;
+        orgs[0].private_access = PrivateAccess::Included;
+        orgs[1].private_access = PrivateAccess::NoToken;
+        let r = build(&orgs, &opts());
+        assert_eq!(r.totals.repos, 3);
+        assert_eq!(r.totals.repos_private, 1);
+        assert_eq!(r.orgs[0].totals.repos_private, 1);
+        assert_eq!(
+            (r.orgs[0].private_repos, r.orgs[0].private_access),
+            (1, PrivateAccess::Included)
+        );
+        assert_eq!(r.orgs[1].totals.repos_private, 0);
+        assert!(!r.notes.iter().any(|n| n.starts_with("acme:")));
+        assert!(r
+            .notes
+            .contains(&"beta: private repositories not included (no token).".to_string()));
+        let reasons = [
+            (
+                PrivateAccess::NoneVisible,
+                None,
+                "(none visible to this token)",
+            ),
+            (
+                PrivateAccess::ListingFailed,
+                Some(403),
+                "(the full repository listing failed with HTTP 403; public repositories only)",
+            ),
+            (
+                PrivateAccess::UserAccount,
+                None,
+                "(user account: public repositories only)",
+            ),
+        ];
+        for (access, status, why) in reasons {
+            orgs[1].private_access = access;
+            orgs[1].listing_status = status;
+            let r = build(&orgs, &opts());
+            let note = format!("beta: private repositories not included {why}.");
+            assert!(r.notes.contains(&note), "{:?}", r.notes);
+        }
     }
 }

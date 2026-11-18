@@ -106,14 +106,14 @@ pub fn mock_acme(server: &mut ServerGuard) -> Vec<Mock> {
             "avatar_url": "https://avatars.example/acme", "html_url": "https://github.com/acme"
         })),
         server
-            .mock("GET", "/orgs/acme/repos?type=public&per_page=100")
+            .mock("GET", "/orgs/acme/repos?type=all&per_page=100")
             .with_status(200)
             .with_header("content-type", "application/json")
-            .with_header("link", &format!("<{base}/orgs/acme/repos?type=public&per_page=100&page=2>; rel=\"next\""))
+            .with_header("link", &format!("<{base}/orgs/acme/repos?type=all&per_page=100&page=2>; rel=\"next\""))
             .with_body(json!([{"name": "api", "fork": false, "archived": false}, {"name": "fork1", "fork": true, "archived": false}]).to_string())
             .create(),
         server
-            .mock("GET", "/orgs/acme/repos?type=public&per_page=100&page=2")
+            .mock("GET", "/orgs/acme/repos?type=all&per_page=100&page=2")
             .with_status(200)
             .with_header("content-type", "application/json")
             .with_body(json!([{"name": "web", "fork": false, "archived": true}]).to_string())

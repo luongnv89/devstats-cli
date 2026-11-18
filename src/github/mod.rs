@@ -188,26 +188,36 @@ impl Client {
         }
     }
 
-    /// GET every page of a list endpoint. `Ok(None)` on 404.
-    pub fn get_all(&self, path: &str) -> Result<Option<Vec<Value>>> {
+    /// Whether requests carry a token (without one GitHub shows only public data).
+    pub fn has_token(&self) -> bool {
+        self.token.is_some()
+    }
+
+    /// GET every page of a list endpoint. A page that is not a 200 JSON array stops
+    /// the walk and comes back as `Pages::Stopped`, so the caller decides what its
+    /// status means; errors from `get` itself (401, rate limit, network) stay `Err`.
+    pub fn get_all(&self, path: &str) -> Result<Pages> {
         let mut out = Vec::new();
         let mut next = Some(path.to_string());
         while let Some(url) = next {
             let r = self.get(&url)?;
-            if r.status == 404 {
-                return Ok(None);
-            }
-            if r.status != 200 {
-                return Err(unexpected(&url, &r));
-            }
             match r.body {
-                Value::Array(items) => out.extend(items),
-                _ => return Err(unexpected(&url, &r)),
+                Value::Array(items) if r.status == 200 => out.extend(items),
+                _ => return Ok(Pages::Stopped { url, resp: r }),
             }
             next = r.next;
         }
-        Ok(Some(out))
+        Ok(Pages::All(out))
     }
+}
+
+/// Result of `Client::get_all`.
+#[derive(Debug)]
+pub enum Pages {
+    /// The items of every page.
+    All(Vec<Value>),
+    /// The first page that was not a 200 JSON array, with its URL.
+    Stopped { url: String, resp: Resp },
 }
 
 pub fn unexpected(url: &str, r: &Resp) -> AppError {

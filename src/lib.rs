@@ -21,7 +21,7 @@ use clap::{CommandFactory, FromArgMatches};
 use crate::cli::{Cli, Format};
 use crate::error::{AppError, Result};
 use crate::github::{repos, search, stats, Client, DEFAULT_API};
-use crate::model::OrgData;
+use crate::model::{OrgData, PrivateAccess};
 use crate::style::{decide, Env, Mode, Stream};
 use crate::ui::Reporter;
 
@@ -106,7 +106,7 @@ fn execute(cli: &Cli, ui: Arc<Reporter>, out_mode: Mode) -> Result<()> {
     );
     match &token {
         Some((_, source)) => ui.debug(&format!("using the token from {source}")),
-        None => ui.warn("no GitHub token found; GitHub allows only 60 requests/hour without one (set GITHUB_TOKEN or run `gh auth login`)"),
+        None => ui.warn("no GitHub token found; only public repositories are scanned, and GitHub allows only 60 requests/hour without one (set GITHUB_TOKEN or run `gh auth login`)"),
     }
     let client = Client::new(&api, token.map(|(t, _)| t), ui.clone(), !cli.no_cache);
 
@@ -171,19 +171,37 @@ fn collect_org(client: &Client, login: &str, cli: &Cli) -> Result<Option<OrgData
             .warn(&format!("'{login}' was not found on GitHub; skipping it"));
         return Ok(None);
     };
-    let all = repos::list(client, &owner)?;
-    let total = all.len();
-    let scanned: Vec<String> = all
+    let listing = repos::list(client, &owner)?;
+    let total = listing.repos.len();
+    let (scanned, private): (Vec<String>, Vec<bool>) = listing
+        .repos
         .into_iter()
         .filter(|r| cli.include_forks || !r.fork)
         .filter(|r| !(cli.exclude_archived && r.archived))
-        .map(|r| r.name)
-        .collect();
+        .map(|r| (r.name, r.private))
+        .unzip();
+    let private_repos = private.iter().filter(|p| **p).count();
     client.ui.debug(&format!(
-        "{}: {} of {total} repos to scan",
+        "{}: {} of {total} repos to scan ({private_repos} private)",
         owner.login,
         scanned.len()
     ));
+    match listing.access {
+        PrivateAccess::ListingFailed => client.ui.warn(&format!(
+            "{}: the full repository listing failed (HTTP {}); only public repositories are scanned (if the organization uses SAML single sign-on, authorize the token for it)",
+            owner.login,
+            listing.failed_status.unwrap_or_default()
+        )),
+        PrivateAccess::NoneVisible => client.ui.info(&format!(
+            "{}: no private repositories visible to this token; scanned public repositories only",
+            owner.login
+        )),
+        PrivateAccess::UserAccount => client.ui.debug(&format!(
+            "{}: user account; GitHub lists only its public repositories",
+            owner.login
+        )),
+        PrivateAccess::Included | PrivateAccess::NoToken => {}
+    }
     client.ui.progress(&owner.login, 0, Some(scanned.len()));
 
     let from = cli.since.unwrap_or_else(search::epoch);
@@ -219,6 +237,9 @@ fn collect_org(client: &Client, login: &str, cli: &Cli) -> Result<Option<OrgData
     Ok(Some(OrgData {
         repos_skipped: total - scanned.len(),
         repos_scanned: scanned,
+        private_repos,
+        private_access: listing.access,
+        listing_status: listing.failed_status,
         stats: repo_stats?,
         items: items?,
         owner,
