@@ -47,6 +47,8 @@ API responses are cached for an hour per token, so re-sorting or re-rendering co
 | Feature | What you get |
 |---|---|
 | Multi-org | Pass several orgs or users; contributors merge across all of them |
+| Single repository | Pass `owner/repo` (or its URL) to rank who contributed to one project |
+| PR breakdown | PRs opened per person, split into merged, still open, and closed without merging, overall and per week (`--pr-weeks`) |
 | Private repos | Scanned when the token can read them; the report says when it can't |
 | Time periods | `1y` by default; `all`, `6m`, `3m`, `1m`, `1w`, `1d`, or explicit dates |
 | Terminal table | Share meter and 52-week braille activity graph; top value per column highlighted |
@@ -139,6 +141,24 @@ devstats https://github.com/anthropics --period 3m --top 10
 
 ### More runs
 
+One repository: who contributed, with PRs merged, open, and closed, over the last 3 months:
+
+```bash
+devstats https://github.com/openai/codex --period 3m
+```
+
+Each contributor's pull requests week by week over the last 3 months:
+
+```bash
+devstats openai/codex --period 3m --pr-weeks
+```
+
+The same repository over an explicit window, ranked by pull requests:
+
+```bash
+devstats openai/codex --since 2026-01-01 --until 2026-06-30 --sort prs
+```
+
 Two orgs, top 10 by lines changed:
 
 ```bash
@@ -220,7 +240,10 @@ Prebuilt binaries for Linux, macOS, and Windows are attached to each tagged GitH
 <summary>Options</summary>
 
 Organizations can be given as `https://github.com/NAME`, `github.com/NAME`, or `NAME`.
-A user account works too. An unknown name prints a warning and the others still run.
+A user account works too. To scan one repository, give `https://github.com/OWNER/REPO`
+(any page of it, such as `/pulls` or `/tree/main`, works) or `OWNER/REPO`. A named
+repository is scanned even if it is a fork or archived. A repository whose owner is also
+given as a whole is counted once. An unknown name prints a warning and the others still run.
 
 | Option | Default | What it does |
 |---|---|---|
@@ -234,6 +257,7 @@ A user account works too. An unknown name prints a warning and the others still 
 | `--exclude-archived` | off | Skip archived repositories |
 | `--include-bots` | off | Keep `*[bot]` accounts |
 | `--per-org` | off | Also print one table per organization |
+| `--pr-weeks` | off | Also show each contributor's PRs per week (opened, merged, open, closed). In TSV, print one line per contributor and week instead |
 | `-j, --jobs N` | `6` | Repositories fetched in parallel |
 | `--token` | see below | GitHub token |
 | `--api-url` | `https://api.github.com` | For GitHub Enterprise (or `DEVSTATS_API_URL`) |
@@ -294,8 +318,8 @@ If the organization uses SAML single sign-on, the token must also be authorized 
 
 Without a token, or without access, only public repositories are scanned and the report
 says so: the table footer reads `public repos only`, the JSON has
-`orgs[].private_access` (`included`, `none_visible`, `no_token`, `listing_failed`, or
-`user_account`), and the HTML report shows it on each organization card and in the notes.
+`orgs[].private_access` (`included`, `none_visible`, `no_token`, `listing_failed`,
+`user_account`, or `repository` for a single named repository), and the HTML report shows it on each organization card and in the notes.
 `none_visible` means the token saw no private repositories: GitHub's listing can't tell
 "no access" from "no private repositories". If the full listing fails (for example SSO
 not authorized), devstats warns and falls back to the public repositories. The private
@@ -315,9 +339,14 @@ For a user account, GitHub lists only public repositories, so only those are sca
   locale.
 - **Piped, or `--format tsv`:** one contributor per line, tab-separated, with no header and
   no escape codes. The fields are `login, commits, additions, deletions, prs, prs_merged,
-  issues, repos, orgs`.
+  issues, repos, orgs, prs_open, prs_closed` (`orgs` holds `owner/repo` for a repository
+  target). With `--pr-weeks`, each line is one contributor and week instead:
+  `login, week, prs, merged, open, closed`, only for weeks with at least one PR.
+- **`--pr-weeks` in the terminal:** an extra box lists each shown contributor's weeks with
+  PRs, oldest first, with a bar scaled to the busiest week.
 - **`--format json`:** the full report: totals, per-organization breakdowns, the weekly
-  series, and the 52-week activity of each contributor.
+  series, the 52-week activity of each contributor, and their PRs per week
+  (`contributors[].pr_weeks`: `week`, `prs`, `merged`, `open`, `closed`).
 - **`--html`:** one offline HTML file with KPI tiles, ranked bars with a metric switch, code
   churn, the weekly commit timeline, organization cards, and a sortable, searchable
   contributor table. It has light and dark themes and prints cleanly.
@@ -332,7 +361,7 @@ For a user account, GitHub lists only public repositories, so only those are sca
 | 0 | success |
 | 1 | runtime error (network, API, rate limit exhausted, unwritable `--html` path) |
 | 2 | usage error (unknown flag, bad value, `--since` after `--until`, `--period` with a date flag) |
-| 3 | input error (invalid org name or URL, none of the orgs exist) |
+| 3 | input error (invalid org, repository, or URL; none of them exist) |
 | 130 | interrupted (Ctrl+C) |
 
 </details>
@@ -368,8 +397,11 @@ devstats --completions fish > ~/.config/fish/completions/devstats.fish
   commits linked to a GitHub account. GitHub reports 0 lines for repositories with 10,000 or
   more commits. GitHub computes these stats lazily, so the first run on a cold repository
   can take a minute while devstats retries.
-- **Pull requests and issues** come from one org-wide Search query each, counted by author and
-  creation date. Search covers every repository the token can read, private ones included. Search returns at most 1,000 results per query, so devstats splits larger
+- **Pull requests and issues** come from one org-wide (or, for a repository target,
+  repository-wide) Search query each, counted by author and creation date. Each PR is also
+  split by its state today: merged, still open, or closed without merging. Per-week counts
+  group PRs by the week they were opened (weeks start on Sunday, UTC, as in GitHub's
+  stats), so the first and last week of a period can be partial. Search covers every repository the token can read, private ones included. Search returns at most 1,000 results per query, so devstats splits larger
   date ranges automatically. Search is also limited to 30 requests per minute, so large orgs
   can pause briefly.
 - Contributors are merged by GitHub login across repositories and organizations. Bots are

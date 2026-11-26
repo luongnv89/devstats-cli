@@ -1,6 +1,7 @@
 //! Pull requests and issues per author, through the Search API (`/search/issues`).
 //!
-//! One query covers a whole organization (`org:X is:pr created:A..B`), 100 results
+//! One query covers a whole organization (`org:X is:pr created:A..B`) or one repository
+//! (`repo:X/Y is:pr created:A..B`), 100 results
 //! per page. Search returns at most 1000 results per query, so a range with more is
 //! split in half until every part fits.
 
@@ -18,32 +19,38 @@ pub fn epoch() -> NaiveDate {
 
 const SEARCH_CAP: u64 = 1000;
 
-/// Every PR (`prs = true`) or issue opened in the owner's repositories within `from..=to`.
+/// Search qualifier for an owner's repositories (`org:X` or `user:X`) or one repository (`repo:X/Y`).
+pub fn scope(owner: &str, is_org: bool, repo: Option<&str>) -> String {
+    match repo {
+        Some(r) => format!("repo:{owner}/{r}"),
+        None if is_org => format!("org:{owner}"),
+        None => format!("user:{owner}"),
+    }
+}
+
+/// Every PR (`prs = true`) or issue opened in `scope` (see [`scope`]) within `from..=to`.
 pub fn fetch(
     client: &Client,
-    owner: &str,
-    is_org: bool,
+    scope: &str,
     prs: bool,
     from: NaiveDate,
     to: NaiveDate,
 ) -> Result<Vec<Item>> {
     let mut out = Vec::new();
-    fetch_range(client, owner, is_org, prs, from, to, &mut out)?;
+    fetch_range(client, scope, prs, from, to, &mut out)?;
     Ok(out)
 }
 
 fn fetch_range(
     client: &Client,
-    owner: &str,
-    is_org: bool,
+    scope: &str,
     prs: bool,
     from: NaiveDate,
     to: NaiveDate,
     out: &mut Vec<Item>,
 ) -> Result<()> {
     let q = format!(
-        "{}:{owner} is:{} created:{from}..{to}",
-        if is_org { "org" } else { "user" },
+        "{scope} is:{} created:{from}..{to}",
         if prs { "pr" } else { "issue" }
     );
     let path = format!(
@@ -67,13 +74,14 @@ fn fetch_range(
         client
             .ui
             .debug(&format!("'{q}' has {total} results; splitting at {mid}"));
-        fetch_range(client, owner, is_org, prs, from, mid, out)?;
-        return fetch_range(client, owner, is_org, prs, mid + Duration::days(1), to, out);
+        fetch_range(client, scope, prs, from, mid, out)?;
+        return fetch_range(client, scope, prs, mid + Duration::days(1), to, out);
     }
     if total > SEARCH_CAP {
         client.ui.warn(&format!(
-            "more than {SEARCH_CAP} {} were opened in {owner} on {from}; only the first {SEARCH_CAP} are counted",
-            if prs { "pull requests" } else { "issues" }
+            "more than {SEARCH_CAP} {} were opened in {} on {from}; only the first {SEARCH_CAP} are counted",
+            if prs { "pull requests" } else { "issues" },
+            scope.split_once(':').map_or(scope, |(_, s)| s)
         ));
     }
     if first.body["incomplete_results"].as_bool() == Some(true) {
@@ -112,6 +120,7 @@ fn collect(body: &Value, prs: bool, out: &mut Vec<Item>) {
             is_bot: it["user"]["type"].as_str() == Some("Bot") || login.ends_with("[bot]"),
             is_pr: prs,
             merged: prs && it["pull_request"]["merged_at"].is_string(),
+            open: it["state"].as_str() == Some("open"),
             created,
         });
     }

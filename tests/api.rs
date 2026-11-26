@@ -49,7 +49,9 @@ fn tsv_has_one_record_per_contributor() {
         ])
         .assert()
         .success()
-        .stdout("alice\t12\t1020\t102\t0\t0\t0\t2\tacme\nbob\t5\t50\t5\t0\t0\t0\t1\tacme\n");
+        .stdout(
+            "alice\t12\t1020\t102\t0\t0\t0\t2\tacme\t0\t0\nbob\t5\t50\t5\t0\t0\t0\t1\tacme\t0\t0\n",
+        );
 }
 
 #[test]
@@ -195,7 +197,7 @@ fn user_accounts_use_the_users_repo_endpoint() {
         .args(["solo", "--format", "tsv", "--api-url", &server.url()])
         .assert()
         .success()
-        .stdout("solo\t3\t3\t3\t0\t0\t0\t1\tsolo\n");
+        .stdout("solo\t3\t3\t3\t0\t0\t0\t1\tsolo\t0\t0\n");
 }
 
 #[test]
@@ -344,6 +346,215 @@ fn search_counts_prs_and_issues_and_splits_big_ranges() {
     assert_eq!(carol["issues"], 1);
     assert_eq!(carol["commits"], 0);
     assert_eq!(r["totals"]["prs"], 2, "bot PRs are excluded");
+}
+
+#[test]
+fn repository_target_scans_only_that_repo_with_pr_states() {
+    let mut server = mockito::Server::new();
+    let repo = json_mock(
+        &mut server,
+        "/repos/acme/api",
+        200,
+        json!({
+            "name": "api", "private": false, "html_url": "https://github.com/acme/api",
+            "owner": {"login": "acme", "type": "Organization", "avatar_url": "a", "html_url": "https://github.com/acme"}
+        }),
+    );
+    let stats = json_mock(
+        &mut server,
+        "/repos/acme/api/stats/contributors",
+        200,
+        json!([
+            author("alice", &[(1, 10, 1000, 100)]),
+            author("bob", &[(2, 5, 50, 5)])
+        ]),
+    );
+    let mut open = search_item("bob", false);
+    open["state"] = json!("open");
+    let mut closed = search_item("bob", false);
+    closed["state"] = json!("closed");
+    let prs = server
+        .mock(
+            "GET",
+            mockito::Matcher::Regex(r"^/search/issues\?q=repo:acme%2Fapi\+is:pr".into()),
+        )
+        .with_status(200)
+        .with_body(
+            json!({"total_count": 3, "items": [search_item("alice", true), open, closed]})
+                .to_string(),
+        )
+        .expect(1)
+        .create();
+    let issues = server
+        .mock(
+            "GET",
+            mockito::Matcher::Regex(r"^/search/issues\?q=repo:acme%2Fapi\+is:issue".into()),
+        )
+        .with_status(200)
+        .with_body(json!({"total_count": 0, "items": []}).to_string())
+        .expect(1)
+        .create();
+    // The org listing must not be touched.
+    let listing = server
+        .mock("GET", mockito::Matcher::Regex("^/orgs/".into()))
+        .expect(0)
+        .create();
+    let out = devstats()
+        .args([
+            "https://github.com/acme/api/pulls",
+            "--format",
+            "json",
+            "--period",
+            "all",
+            "--api-url",
+            &server.url(),
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let r: Value = serde_json::from_slice(&out).unwrap();
+    repo.assert();
+    stats.assert();
+    prs.assert();
+    issues.assert();
+    listing.assert();
+    assert_eq!(r["orgs"][0]["login"], "acme/api");
+    assert_eq!(r["orgs"][0]["kind"], "repository");
+    assert_eq!(r["orgs"][0]["private_access"], "repository");
+    assert_eq!(r["totals"]["repos"], 1);
+    let c = &r["contributors"];
+    assert_eq!(c[0]["login"], "alice");
+    assert_eq!(c[0]["orgs"], json!(["acme/api"]));
+    assert_eq!(c[0]["html_url"], format!("{}/alice", "https://github.com"));
+    assert_eq!(
+        (
+            &c[1]["prs"],
+            &c[1]["prs_merged"],
+            &c[1]["prs_open"],
+            &c[1]["prs_closed"]
+        ),
+        (&json!(2), &json!(0), &json!(1), &json!(1))
+    );
+    assert_eq!(
+        (&r["totals"]["prs"], &r["totals"]["prs_merged"]),
+        (&json!(3), &json!(1))
+    );
+    assert!(!notes(&r)
+        .iter()
+        .any(|n| n.contains("private repositories not included")));
+}
+
+/// Org acme, plus alice's PRs: two in the week of 2026-01-04 (one merged, one closed)
+/// and one still open in the week of 2026-01-11.
+fn mock_acme_pr_weeks() -> (mockito::ServerGuard, Vec<mockito::Mock>) {
+    let mut server = mockito::Server::new();
+    let mut open = search_item("alice", false);
+    open["state"] = json!("open");
+    open["created_at"] = json!("2026-01-12T09:00:00Z");
+    let mut mocks = vec![server
+        .mock(
+            "GET",
+            mockito::Matcher::Regex(r"^/search/issues\?q=org:acme\+is:pr".into()),
+        )
+        .with_status(200)
+        .with_body(
+            json!({"total_count": 3, "items": [search_item("alice", true), search_item("alice", false), open]})
+                .to_string(),
+        )
+        .create()];
+    mocks.extend(mock_acme(&mut server));
+    (server, mocks)
+}
+
+#[test]
+fn pr_weeks_in_json_tsv_and_table() {
+    let (server, _m) = mock_acme_pr_weeks();
+    let r = run_json(&server, &["--period", "all"]);
+    let alice = &r["contributors"][0];
+    assert_eq!(alice["login"], "alice");
+    assert_eq!(
+        alice["pr_weeks"],
+        json!([
+            {"week": "2026-01-04", "prs": 2, "merged": 1, "open": 0, "closed": 1},
+            {"week": "2026-01-11", "prs": 1, "merged": 0, "open": 1, "closed": 0}
+        ])
+    );
+    assert_eq!(r["contributors"][1]["pr_weeks"], json!([]));
+
+    let (server, _m) = mock_acme_pr_weeks();
+    devstats()
+        .args([
+            "acme",
+            "--period",
+            "all",
+            "--pr-weeks",
+            "--format",
+            "tsv",
+            "--api-url",
+            &server.url(),
+        ])
+        .assert()
+        .success()
+        .stdout("alice\t2026-01-04\t2\t1\t0\t1\nalice\t2026-01-11\t1\t0\t1\t0\n");
+
+    let (server, _m) = mock_acme_pr_weeks();
+    devstats()
+        .args([
+            "acme",
+            "--period",
+            "all",
+            "--pr-weeks",
+            "--api-url",
+            &server.url(),
+        ])
+        .env("FORCE_COLOR", "1")
+        .env("COLUMNS", "100")
+        .assert()
+        .success()
+        .stdout(
+            predicate::str::contains("pull requests per week")
+                .and(predicate::str::contains("2026-01-11")),
+        );
+}
+
+#[test]
+fn missing_repository_warns_and_repo_inside_scanned_org_is_counted_once() {
+    let mut server = mockito::Server::new();
+    let _missing = json_mock(
+        &mut server,
+        "/repos/acme/nope",
+        404,
+        json!({"message": "Not Found"}),
+    );
+    devstats()
+        .args(["acme/nope", "--api-url", &server.url()])
+        .assert()
+        .code(3)
+        .stderr(predicate::str::contains("'acme/nope' was not found"));
+    let _m = mock_acme(&mut server);
+    let mut cmd = devstats();
+    cmd.args([
+        "acme",
+        "acme/api",
+        "--format",
+        "json",
+        "--api-url",
+        &server.url(),
+    ]);
+    let out = cmd
+        .assert()
+        .success()
+        .stderr(predicate::str::contains(
+            "already covered by the scan of acme",
+        ))
+        .get_output()
+        .stdout
+        .clone();
+    let r: Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(r["orgs"].as_array().unwrap().len(), 1);
+    assert_eq!(r["contributors"][0]["commits"], 12);
 }
 
 #[test]
@@ -541,9 +752,9 @@ fn private_repos_reach_tsv_table_and_html() {
         .assert()
         .success()
         .stdout(
-            "alice\t19\t1090\t109\t0\t0\t0\t3\tacme\n\
-             bob\t5\t50\t5\t0\t0\t0\t1\tacme\n\
-             carol\t4\t40\t4\t0\t0\t0\t1\tacme\n",
+            "alice\t19\t1090\t109\t0\t0\t0\t3\tacme\t0\t0\n\
+             bob\t5\t50\t5\t0\t0\t0\t1\tacme\t0\t0\n\
+             carol\t4\t40\t4\t0\t0\t0\t1\tacme\t0\t0\n",
         );
     let html = std::fs::read_to_string(&path).unwrap();
     let start = html.find(r#"id="devstats-data">"#).unwrap() + r#"id="devstats-data">"#.len();

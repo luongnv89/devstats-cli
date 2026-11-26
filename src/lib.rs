@@ -22,6 +22,7 @@ use crate::cli::{Cli, Format, Period};
 use crate::error::{AppError, Result};
 use crate::github::{repos, search, stats, Client, DEFAULT_API};
 use crate::model::{OrgData, PrivateAccess};
+use crate::org::Target;
 use crate::style::{decide, Env, Mode, Stream};
 use crate::ui::Reporter;
 
@@ -120,7 +121,7 @@ impl DateRange {
 fn execute(cli: &Cli, ui: Arc<Reporter>, out_mode: Mode) -> Result<()> {
     let today = Utc::now().date_naive();
     let range = DateRange::resolve(cli, today)?;
-    let logins = org::parse_all(&cli.orgs)?;
+    let targets = drop_covered(org::parse_all(&cli.orgs)?, &ui);
 
     let api = cli
         .api_url
@@ -152,8 +153,12 @@ fn execute(cli: &Cli, ui: Arc<Reporter>, out_mode: Mode) -> Result<()> {
         });
         let result = (|| {
             let mut data = Vec::new();
-            for login in &logins {
-                if let Some(d) = collect_org(&client, login, cli, &range, today)? {
+            for t in &targets {
+                let d = match &t.repo {
+                    Some(repo) => collect_repo(&client, &t.owner, repo, cli, &range, today)?,
+                    None => collect_org(&client, &t.owner, cli, &range, today)?,
+                };
+                if let Some(d) = d {
                     data.push(d);
                 }
             }
@@ -165,8 +170,8 @@ fn execute(cli: &Cli, ui: Arc<Reporter>, out_mode: Mode) -> Result<()> {
     ui.clear();
     if data.is_empty() {
         return Err(
-            AppError::input("none of the given organizations exist on GitHub")
-                .hint("check the spelling, e.g. https://github.com/Montimage"),
+            AppError::input("none of the given organizations or repositories exist on GitHub")
+                .hint("check the spelling, e.g. https://github.com/Montimage or https://github.com/Montimage/mmt-probe"),
         );
     }
 
@@ -183,9 +188,12 @@ fn execute(cli: &Cli, ui: Arc<Reporter>, out_mode: Mode) -> Result<()> {
 
     let text = match cli.format {
         Format::Json => output::json::render(&report),
-        Format::Tsv => output::tsv::render(&report),
-        Format::Table if out_mode.styled => output::table::render(&report, &out_mode, cli.per_org),
-        Format::Table => output::tsv::render(&report),
+        Format::Table if out_mode.styled => {
+            output::table::render(&report, &out_mode, cli.per_org, cli.pr_weeks)
+        }
+        // TSV, or a table piped to another program.
+        _ if cli.pr_weeks => output::tsv::render_pr_weeks(&report),
+        _ => output::tsv::render(&report),
     };
     if let Some(path) = &cli.html {
         output::html::write(&report, path)?;
@@ -238,41 +246,15 @@ fn collect_org(
             "{}: user account; GitHub lists only its public repositories",
             owner.login
         )),
-        PrivateAccess::Included | PrivateAccess::NoToken => {}
+        PrivateAccess::Included | PrivateAccess::NoToken | PrivateAccess::Repository => {}
     }
     client.ui.progress(&owner.login, 0, Some(scanned.len()));
 
-    let from = range.since.unwrap_or_else(search::epoch);
-    let to = range.until.unwrap_or(today);
-    // Search (rate-limited to 30/min) runs beside the stats workers.
-    let (repo_stats, items) = std::thread::scope(|s| {
-        let search = s.spawn(|| -> Result<Vec<model::Item>> {
-            let mut items = search::fetch(client, &owner.login, owner.is_org, true, from, to)?;
-            items.extend(search::fetch(
-                client,
-                &owner.login,
-                owner.is_org,
-                false,
-                from,
-                to,
-            )?);
-            Ok(items)
-        });
-        let on_done = |n: usize| client.ui.progress(&owner.login, n, Some(scanned.len()));
-        let st = stats::fetch_all(client, &owner.login, &scanned, cli.jobs as usize, &on_done);
-        if !search.is_finished() {
-            client
-                .ui
-                .progress_note(&owner.login, "counting pull requests and issues");
-        }
-        (
-            st,
-            search
-                .join()
-                .unwrap_or_else(|_| Err(AppError::runtime("search worker crashed"))),
-        )
-    });
+    let scope = search::scope(&owner.login, owner.is_org, None);
+    let (repo_stats, items) =
+        fetch_activity(client, &owner.login, &scope, &scanned, cli, range, today);
     Ok(Some(OrgData {
+        repo: None,
         repos_skipped: total - scanned.len(),
         repos_scanned: scanned,
         private_repos,
@@ -282,6 +264,105 @@ fn collect_org(
         items: items?,
         owner,
     }))
+}
+
+/// Fetch everything for one repository. `Ok(None)` (after a warning) when it does
+/// not exist or the token cannot read it. --include-forks and --exclude-archived do
+/// not apply: the repository was named explicitly.
+fn collect_repo(
+    client: &Client,
+    owner: &str,
+    name: &str,
+    cli: &Cli,
+    range: &DateRange,
+    today: NaiveDate,
+) -> Result<Option<OrgData>> {
+    let label = format!("{owner}/{name}");
+    client.ui.progress(&label, 0, None);
+    let Some((owner, repo)) = repos::repo(client, owner, name)? else {
+        client.ui.warn(&format!(
+            "'{label}' was not found on GitHub (or this token cannot read it); skipping it"
+        ));
+        return Ok(None);
+    };
+    let label = format!("{}/{}", owner.login, repo.name);
+    let scanned = vec![repo.name.clone()];
+    client.ui.progress(&label, 0, Some(1));
+    let scope = search::scope(&owner.login, owner.is_org, Some(&repo.name));
+    let (repo_stats, items) =
+        fetch_activity(client, &owner.login, &scope, &scanned, cli, range, today);
+    Ok(Some(OrgData {
+        private_repos: repo.private as usize,
+        private_access: PrivateAccess::Repository,
+        listing_status: None,
+        repos_skipped: 0,
+        repos_scanned: scanned,
+        stats: repo_stats?,
+        items: items?,
+        repo: Some(repo),
+        owner,
+    }))
+}
+
+/// Contributor stats for `repos` of `owner`, and the PRs and issues in `scope`.
+/// Search (rate-limited to 30/min) runs beside the stats workers.
+#[allow(clippy::type_complexity)]
+fn fetch_activity(
+    client: &Client,
+    owner: &str,
+    scope: &str,
+    repos: &[String],
+    cli: &Cli,
+    range: &DateRange,
+    today: NaiveDate,
+) -> (Result<Vec<stats::RepoStats>>, Result<Vec<model::Item>>) {
+    let from = range.since.unwrap_or_else(search::epoch);
+    let to = range.until.unwrap_or(today);
+    let label = scope.split_once(':').map_or(scope, |(_, s)| s);
+    std::thread::scope(|s| {
+        let search = s.spawn(|| -> Result<Vec<model::Item>> {
+            let mut items = search::fetch(client, scope, true, from, to)?;
+            items.extend(search::fetch(client, scope, false, from, to)?);
+            Ok(items)
+        });
+        let on_done = |n: usize| client.ui.progress(label, n, Some(repos.len()));
+        let st = stats::fetch_all(client, owner, repos, cli.jobs as usize, &on_done);
+        if !search.is_finished() {
+            client
+                .ui
+                .progress_note(label, "counting pull requests and issues");
+        }
+        (
+            st,
+            search
+                .join()
+                .unwrap_or_else(|_| Err(AppError::runtime("search worker crashed"))),
+        )
+    })
+}
+
+/// Drop repository targets whose owner is also scanned as a whole (with a warning),
+/// so their contributions are not counted twice.
+fn drop_covered(targets: Vec<Target>, ui: &Reporter) -> Vec<Target> {
+    let whole: Vec<String> = targets
+        .iter()
+        .filter(|t| t.repo.is_none())
+        .map(|t| t.owner.to_lowercase())
+        .collect();
+    targets
+        .into_iter()
+        .filter(|t| {
+            let covered = t.repo.is_some() && whole.contains(&t.owner.to_lowercase());
+            if covered {
+                ui.warn(&format!(
+                    "'{}' is already covered by the scan of {}; counting it once",
+                    t.label(),
+                    t.owner
+                ));
+            }
+            !covered
+        })
+        .collect()
 }
 
 /// Write to stdout; a closed pipe (`devstats … | head`) is not an error.

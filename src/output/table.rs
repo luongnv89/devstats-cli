@@ -71,7 +71,7 @@ struct Section {
     border: u8,
 }
 
-pub fn render(r: &Report, mode: &Mode, per_org: bool) -> String {
+pub fn render(r: &Report, mode: &Mode, per_org: bool, pr_weeks: bool) -> String {
     let w = mode.width;
     let shown = r.contributors.len();
     let label = r.sort.label();
@@ -116,6 +116,22 @@ pub fn render(r: &Report, mode: &Mode, per_org: bool) -> String {
                 border: ((i + 1) % 4) as u8,
             });
         }
+    }
+    if pr_weeks {
+        let rows: usize = r.contributors.iter().map(|c| c.pr_weeks.len()).sum();
+        sections.push(Section {
+            title: format!(
+                "pull requests per week{}{} rows",
+                sep(mode),
+                thousands(rows as u64)
+            ),
+            footer: format!(
+                "weeks start on Sunday{}PRs by creation week, state as of today",
+                sep(mode)
+            ),
+            lines: pr_week_lines(mode, &r.contributors, w),
+            border: 1,
+        });
     }
     let (summary_title, summary_items, summary_footer) = summary_parts(r, mode);
     // One box width for every section: wide enough for the content, never wider than the terminal.
@@ -171,17 +187,25 @@ fn pack(items: Vec<Line>, inner: usize) -> Vec<Line> {
 fn summary_parts(r: &Report, mode: &Mode) -> (String, Vec<Line>, String) {
     let t = &r.totals;
     let minus = mode.g("−", "-");
-    let stats: Vec<(String, String)> = vec![
-        (
-            r.orgs.len().to_string(),
-            if r.orgs.len() == 1 { "org" } else { "orgs" }.into(),
-        ),
+    let owners = r.orgs.iter().filter(|o| o.kind != "repository").count();
+    let repos_word = if t.repos == 1 { "repo" } else { "repos" };
+    let mut stats: Vec<(String, String)> = Vec::new();
+    if owners > 0 {
+        stats.push((
+            owners.to_string(),
+            if owners == 1 { "org" } else { "orgs" }.into(),
+        ));
+    }
+    stats.extend([
         (
             thousands(t.repos as u64),
             if t.repos_private > 0 {
-                format!("repos ({} private)", thousands(t.repos_private as u64))
+                format!(
+                    "{repos_word} ({} private)",
+                    thousands(t.repos_private as u64)
+                )
             } else {
-                "repos".into()
+                repos_word.into()
             },
         ),
         (thousands(t.contributors as u64), "contributors".into()),
@@ -196,10 +220,15 @@ fn summary_parts(r: &Report, mode: &Mode) -> (String, Vec<Line>, String) {
         ),
         (
             thousands(t.prs),
-            format!("PRs ({} merged)", thousands(t.prs_merged)),
+            format!(
+                "PRs ({} merged, {} open, {} closed)",
+                thousands(t.prs_merged),
+                thousands(t.prs_open),
+                thousands(t.prs_closed)
+            ),
         ),
         (thousands(t.issues), "issues".into()),
-    ];
+    ]);
     let items: Vec<Line> = stats
         .into_iter()
         .map(|(value, label)| {
@@ -219,7 +248,12 @@ fn summary_parts(r: &Report, mode: &Mode) -> (String, Vec<Line>, String) {
     let public_only: Vec<String> = r
         .orgs
         .iter()
-        .filter(|o| o.private_access != PrivateAccess::Included)
+        .filter(|o| {
+            !matches!(
+                o.private_access,
+                PrivateAccess::Included | PrivateAccess::Repository
+            )
+        })
         .map(|o| sanitize(&o.login, false))
         .collect();
     let footer = if public_only.len() == r.orgs.len() && !public_only.is_empty() {
@@ -274,7 +308,7 @@ fn contributor_lines(
         )];
     }
     let minus = mode.g("−", "-");
-    // Drop order when narrow (highest first): activity, merged, repos, share, issues, -lines, +lines.
+    // Drop order when narrow (highest first): activity, repos, share, closed, open, merged, issues, -lines, +lines.
     let cols = vec![
         Col::new("#", true, 0),
         Col::new("contributor", false, 0).shrinkable(),
@@ -282,11 +316,13 @@ fn contributor_lines(
         Col::new("+lines", true, 1),
         Col::new(&format!("{minus}lines"), true, 2),
         Col::new("PRs", true, 0),
-        Col::new("merged", true, 6),
+        Col::new("merged", true, 4),
+        Col::new("open", true, 5),
+        Col::new("closed", true, 6),
         Col::new("issues", true, 3),
-        Col::new("repos", true, 5),
-        Col::new("share", false, 4),
-        Col::new("activity 52w", false, 7),
+        Col::new("repos", true, 8),
+        Col::new("share", false, 7),
+        Col::new("activity 52w", false, 9),
     ];
     let logins: Vec<String> = list.iter().map(|c| sanitize(&c.login, false)).collect();
     let peaks: Vec<u64> = list
@@ -300,6 +336,8 @@ fn contributor_lines(
     let lead_deletions = leaders(list.iter().map(|c| c.deletions));
     let lead_prs = leaders(list.iter().map(|c| c.prs));
     let lead_merged = leaders(list.iter().map(|c| c.prs_merged));
+    let lead_open = leaders(list.iter().map(|c| c.prs_open));
+    let lead_closed = leaders(list.iter().map(|c| c.prs_closed));
     let lead_issues = leaders(list.iter().map(|c| c.issues));
     let lead_repos = leaders(list.iter().map(|c| c.repos as u64));
     let lead_peak = leaders(peaks.iter().copied());
@@ -341,6 +379,12 @@ fn contributor_lines(
                     role(&lead_merged, Role::Text),
                     &thousands(c.prs_merged),
                 ),
+                Line::of(mode, role(&lead_open, Role::Text), &thousands(c.prs_open)),
+                Line::of(
+                    mode,
+                    role(&lead_closed, Role::Text),
+                    &thousands(c.prs_closed),
+                ),
                 Line::of(
                     mode,
                     key_role(&lead_issues, crate::cli::SortKey::Issues),
@@ -356,6 +400,62 @@ fn contributor_lines(
             ]
         })
         .collect();
+    let shrink = |r: usize, _c: usize, width: usize| {
+        Line::of(
+            mode,
+            Role::Text,
+            &truncate(&logins[r], width, mode.unicode()),
+        )
+    };
+    table(mode, &cols, &rows, w.saturating_sub(4), &shrink)
+}
+
+/// `--pr-weeks`: each contributor's weeks with pull requests, grouped by contributor
+/// (in ranking order), oldest week first, with a bar scaled to the busiest week.
+fn pr_week_lines(mode: &Mode, list: &[Contributor], w: usize) -> Vec<Line> {
+    let with_prs: Vec<&Contributor> = list.iter().filter(|c| !c.pr_weeks.is_empty()).collect();
+    if with_prs.is_empty() {
+        return vec![Line::of(mode, Role::Dim, "no pull requests in this range")];
+    }
+    let cols = vec![
+        Col::new("contributor", false, 0).shrinkable(),
+        Col::new("week", false, 0),
+        Col::new("PRs", true, 0),
+        Col::new("merged", true, 3),
+        Col::new("open", true, 2),
+        Col::new("closed", true, 1),
+        Col::new("", false, 4),
+    ];
+    let max = with_prs
+        .iter()
+        .flat_map(|c| c.pr_weeks.iter().map(|w| w.prs))
+        .max()
+        .unwrap_or(1)
+        .max(1);
+    let bar = mode.g("■", "#");
+    let mut logins: Vec<String> = Vec::new();
+    let mut rows: Vec<Vec<Line>> = Vec::new();
+    for c in with_prs {
+        let login = sanitize(&c.login, false);
+        for (i, wk) in c.pr_weeks.iter().enumerate() {
+            let cells = ((wk.prs as f64 / max as f64) * 10.0).ceil() as usize;
+            let zero = |n: u64| if n == 0 { Role::Dim } else { Role::Text };
+            rows.push(vec![
+                if i == 0 {
+                    Line::of(mode, Role::Text, &login)
+                } else {
+                    Line::new()
+                },
+                Line::of(mode, Role::Dim, &wk.week),
+                Line::of(mode, Role::Title, &thousands(wk.prs)),
+                Line::of(mode, zero(wk.merged), &thousands(wk.merged)),
+                Line::of(mode, zero(wk.open), &thousands(wk.open)),
+                Line::of(mode, zero(wk.closed), &thousands(wk.closed)),
+                Line::of(mode, Role::Text, &bar.repeat(cells.max(1))),
+            ]);
+            logins.push(if i == 0 { login.clone() } else { String::new() });
+        }
+    }
     let shrink = |r: usize, _c: usize, width: usize| {
         Line::of(
             mode,
@@ -442,12 +542,53 @@ mod tests {
             deletions,
             prs,
             prs_merged: 0,
+            prs_open: 0,
+            prs_closed: 0,
+            pr_weeks: vec![],
             issues: 0,
             repos,
             orgs: vec![],
             share,
             activity: vec![0, peak],
         }
+    }
+
+    #[test]
+    fn pr_weeks_section_groups_weeks_under_each_contributor() {
+        use crate::model::PrWeek;
+        let wk = |week: &str, prs, merged, open, closed| PrWeek {
+            week: week.into(),
+            prs,
+            merged,
+            open,
+            closed,
+        };
+        let mut ana = person("ana", 4, 0, 0, 3, 1, 50.0, 1);
+        ana.pr_weeks = vec![wk("2025-03-02", 1, 1, 0, 0), wk("2025-03-09", 2, 0, 1, 1)];
+        let mut r = report(vec![org("acme", PrivateAccess::Included)]);
+        r.contributors = vec![ana, person("bo", 4, 0, 0, 0, 1, 50.0, 1)];
+        let mode = Mode::styled(Tier::None, Glyphs::Unicode, 100);
+        let without = render(&r, &mode, false, false);
+        assert!(!without.contains("pull requests per week"));
+        let out = render(&r, &mode, false, true);
+        assert!(out.contains("pull requests per week · 2 rows"), "{out}");
+        let rows: Vec<&str> = out.lines().filter(|l| l.contains("2025-03-")).collect();
+        assert_eq!(rows.len(), 2, "{out}");
+        assert!(
+            rows[0].contains("ana") && rows[0].contains("■■■■■"),
+            "{out}"
+        );
+        assert!(
+            !rows[1].contains("ana"),
+            "login only on the first week: {out}"
+        );
+        assert!(rows[1].contains("■■■■■■■■■■"), "{out}");
+        assert!(!out
+            .lines()
+            .any(|l| l.contains(" bo ") && l.contains("2025-")));
+        r.contributors[0].pr_weeks.clear();
+        let out = render(&r, &mode, false, true);
+        assert!(out.contains("no pull requests in this range"), "{out}");
     }
 
     fn sample() -> Vec<Contributor> {
@@ -533,7 +674,7 @@ mod tests {
             org("acme-platform-engineering", Included),
             org("acme-security-research", ListingFailed),
         ]);
-        let out = render(&r, &mode, false);
+        let out = render(&r, &mode, false, false);
         let footer = footer_line(&out);
         assert!(width(footer) <= 80, "{out}");
         assert!(!footer.contains('…'), "{footer}");
@@ -545,7 +686,7 @@ mod tests {
 
         let mut r = r;
         r.orgs[0].incomplete_repos = vec!["a".into(), "b".into()];
-        let out = render(&r, &mode, false);
+        let out = render(&r, &mode, false, false);
         let footer = footer_line(&out);
         assert!(
             footer.contains("private repos not included for 1 of 2 orgs"),
@@ -553,7 +694,7 @@ mod tests {
         );
 
         let wide = Mode::styled(Tier::None, Glyphs::Unicode, 200);
-        let out = render(&r, &wide, false);
+        let out = render(&r, &wide, false, false);
         assert!(
             footer_line(&out).contains(
                 "2026-11-18 · 2025-01-01 → 2025-12-31 · 2 repos still computing · \
@@ -572,14 +713,14 @@ mod tests {
         r.range.until = None;
         let wide = Mode::styled(Tier::None, Glyphs::Unicode, 200);
         assert!(
-            footer_line(&render(&r, &wide, false))
+            footer_line(&render(&r, &wide, false, false))
                 .contains("2026-11-18 · last 1 year (since 2025-11-18) · public repos only"),
             "{}",
-            render(&r, &wide, false)
+            render(&r, &wide, false, false)
         );
         for w in [80, 60] {
             let mode = Mode::styled(Tier::None, Glyphs::Unicode, w);
-            let out = render(&r, &mode, false);
+            let out = render(&r, &mode, false, false);
             let footer = footer_line(&out);
             assert!(width(footer) <= w, "{out}");
             assert!(footer.contains("last 1 year"), "{footer}");
@@ -604,7 +745,7 @@ mod tests {
         r.orgs[0].incomplete_repos = vec!["a".into(), "b".into()];
         for w in [80, 60] {
             let mode = Mode::styled(Tier::None, Glyphs::Unicode, w);
-            let out = render(&r, &mode, false);
+            let out = render(&r, &mode, false, false);
             let footer = footer_line(&out);
             assert!(width(footer) <= w, "{out}");
             assert!(footer.contains("public repos only"), "{footer}");
@@ -613,7 +754,7 @@ mod tests {
         }
         r.orgs[0].incomplete_repos.clear();
         let mode = Mode::styled(Tier::None, Glyphs::Unicode, 60);
-        let footer = render(&r, &mode, false);
+        let footer = render(&r, &mode, false, false);
         let footer = footer_line(&footer);
         assert!(!footer.contains('…'), "{footer}");
         assert!(
@@ -621,7 +762,7 @@ mod tests {
             "{footer}"
         );
         let wide = Mode::styled(Tier::None, Glyphs::Unicode, 200);
-        let out = render(&r, &wide, false);
+        let out = render(&r, &wide, false, false);
         assert!(
             footer_line(&out).contains("2026-11-18 · 2025-01-01 → 2025-12-31 · public repos only"),
             "{out}"

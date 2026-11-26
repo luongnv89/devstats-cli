@@ -76,7 +76,7 @@ fn t8_control_characters_are_escaped() {
     let plain = String::from_utf8(stdout_of(&server, &[], &["--format", "tsv"])).unwrap();
     assert!(!plain.as_bytes().contains(&ESC));
     let first = plain.lines().next().unwrap();
-    assert_eq!(first.split('\t').count(), 9, "field count kept: {first}");
+    assert_eq!(first.split('\t').count(), 11, "field count kept: {first}");
     assert!(first.starts_with("ev\\x1b[31mil\\tx\t"));
     let styled = stdout_of(&server, &[("FORCE_COLOR", "1"), ("NO_COLOR", "1")], &[]);
     assert!(!styled.contains(&ESC));

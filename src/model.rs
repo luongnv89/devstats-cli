@@ -14,6 +14,8 @@ pub struct Item {
     pub is_bot: bool,
     pub is_pr: bool,
     pub merged: bool,
+    /// Still open (`state: open`); a PR neither open nor merged was closed unmerged.
+    pub open: bool,
     pub created: NaiveDate,
 }
 
@@ -32,12 +34,24 @@ pub enum PrivateAccess {
     ListingFailed,
     /// GitHub lists only the public repositories of a user account.
     UserAccount,
+    /// One named repository was scanned; no listing, so nothing was left out.
+    Repository,
+}
+
+/// The single repository scanned when a target names one (`owner/repo`).
+#[derive(Debug, Clone)]
+pub struct RepoTarget {
+    pub name: String,
+    pub html_url: String,
+    pub private: bool,
 }
 
 /// Everything fetched for one organization, before aggregation.
 #[derive(Debug, Clone)]
 pub struct OrgData {
     pub owner: Owner,
+    /// Set when only this one repository of `owner` was scanned.
+    pub repo: Option<RepoTarget>,
     pub repos_scanned: Vec<String>,
     pub repos_skipped: usize,
     /// Private repositories among `repos_scanned`.
@@ -61,6 +75,10 @@ pub struct Totals {
     pub deletions: u64,
     pub prs: u64,
     pub prs_merged: u64,
+    /// Pull requests still open.
+    pub prs_open: u64,
+    /// Pull requests closed without being merged.
+    pub prs_closed: u64,
     pub issues: u64,
 }
 
@@ -74,6 +92,10 @@ pub struct Contributor {
     pub deletions: u64,
     pub prs: u64,
     pub prs_merged: u64,
+    /// Pull requests still open.
+    pub prs_open: u64,
+    /// Pull requests closed without being merged.
+    pub prs_closed: u64,
     pub issues: u64,
     /// Repositories with at least one commit by this contributor in the range.
     pub repos: usize,
@@ -82,6 +104,19 @@ pub struct Contributor {
     pub share: f64,
     /// Commits per week for the 52 weeks ending at the range end (oldest first).
     pub activity: Vec<u64>,
+    /// Pull requests opened per week within the range, oldest first; weeks with none are left out.
+    pub pr_weeks: Vec<PrWeek>,
+}
+
+/// Pull requests one contributor opened in one week, split by their state today.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct PrWeek {
+    /// Start of the week (Sunday, UTC), YYYY-MM-DD.
+    pub week: String,
+    pub prs: u64,
+    pub merged: u64,
+    pub open: u64,
+    pub closed: u64,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -94,8 +129,10 @@ pub struct WeekPoint {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct OrgReport {
+    /// `owner`, or `owner/repo` when one repository was scanned.
     pub login: String,
     pub name: Option<String>,
+    /// "organization", "user" or "repository".
     pub kind: &'static str,
     pub avatar_url: String,
     pub html_url: String,
@@ -135,6 +172,16 @@ pub struct Report {
     pub contributors: Vec<Contributor>,
     pub weekly: Vec<WeekPoint>,
     pub notes: Vec<String>,
+}
+
+impl OrgData {
+    /// `owner`, or `owner/repo` for a single-repository target.
+    pub fn label(&self) -> String {
+        match &self.repo {
+            Some(r) => format!("{}/{}", self.owner.login, r.name),
+            None => self.owner.login.clone(),
+        }
+    }
 }
 
 impl Report {

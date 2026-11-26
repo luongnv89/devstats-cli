@@ -171,6 +171,9 @@ svg { display: block; overflow: visible; }
 .cross { stroke: var(--line-strong); stroke-width: 1; stroke-dasharray: 3 3; }
 .cross-dot { fill: var(--bg); stroke: var(--data-line); stroke-width: 2px; }
 .spark { fill: none; stroke: var(--data-line); stroke-width: 1.5px; stroke-linejoin: round; }
+.prw { display: inline-block; line-height: 0; border-radius: 3px; cursor: default; }
+.prw:focus { outline: none; }
+.prw:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 .empty { font: 13px var(--mono); color: var(--muted); padding: 22px 0; }
 
 .tip {
@@ -282,7 +285,7 @@ footer .sig { font-family: var(--mono); }
       </section>
     </div>
 
-    <section class="box" aria-labelledby="h-orgs"><h2 id="h-orgs">organizations</h2><div class="orgs" id="orgs"></div></section>
+    <section class="box" aria-labelledby="h-orgs"><h2 id="h-orgs">scanned</h2><div class="orgs" id="orgs"></div></section>
 
     <section class="box" aria-labelledby="h-all">
       <h2 id="h-all">all contributors<span class="count" id="all-count"></span></h2>
@@ -372,10 +375,23 @@ footer .sig { font-family: var(--mono); }
   }
   const hideTip = () => tip.classList.remove("on");
   addEventListener("scroll", hideTip, { passive: true });
+  const WEEK_MS = 7 * 864e5;
+  const actFrom = Date.parse(D.range.activity_from + "T00:00:00Z");
+  /* PRs opened per week over the same 52 weeks as the commit activity. */
+  const prSeries = (c) => {
+    const s = new Array(52).fill(0);
+    for (const w of c.pr_weeks || []) {
+      const i = Math.round((Date.parse(w.week + "T00:00:00Z") - actFrom) / WEEK_MS);
+      if (i >= 0 && i < 52) s[i] += w.prs;
+    }
+    return s;
+  };
+  const busiestPrWeek = (c) => (c.pr_weeks || []).reduce((b, w) => (!b || w.prs > b.prs ? w : b), null);
   const personRows = (c) => [
     ["commits", fmt(c.commits)], ["lines added", "+" + fmt(c.additions)], ["lines deleted", "−" + fmt(c.deletions)],
-    ["pull requests", fmt(c.prs) + " (" + fmt(c.prs_merged) + " merged)"], ["issues", fmt(c.issues)],
+    ["pull requests", fmt(c.prs) + " (" + fmt(c.prs_merged) + " merged, " + fmt(c.prs_open || 0) + " open, " + fmt(c.prs_closed || 0) + " closed)"], ["issues", fmt(c.issues)],
     ["repositories", fmt(c.repos)], ["share of commits", c.share.toFixed(1) + "%"],
+    ...(busiestPrWeek(c) ? [["busiest PR week", busiestPrWeek(c).week + " (" + fmt(busiestPrWeek(c).prs) + ")"]] : []),
   ];
 
   /* ---------- header ---------- */
@@ -408,7 +424,7 @@ footer .sig { font-family: var(--mono); }
     kpi(fmt(T.repos), "", repoLabel(T)),
     kpi(short(T.commits), "", "commits"),
     kpi("+" + short(T.additions), "", "lines added · −" + short(T.deletions) + " deleted"),
-    kpi(fmt(T.prs), "", "pull requests · " + fmt(T.prs_merged) + " merged"),
+    kpi(fmt(T.prs), "", "pull requests · " + fmt(T.prs_merged) + " merged · " + fmt(T.prs_open || 0) + " open · " + fmt(T.prs_closed || 0) + " closed"),
     kpi(fmt(T.issues), "", "issues opened"),
   );
 
@@ -558,12 +574,27 @@ footer .sig { font-family: var(--mono); }
     s.append(svg("path", { class: "spark", d }));
     return s;
   }
+  /* PRs / week cell: focusable, labelled, and shows the shared #tip on hover, focus and tap. */
+  function prWeeksCell(c) {
+    const weeks = c.pr_weeks || [], spark = sparkline(prSeries(c), 92, 20);
+    if (!weeks.length) return el("span", { class: "prw" }, spark, el("span", { class: "sr" }, c.login + ": no pull requests"));
+    const total = weeks.reduce((a, w) => a + w.prs, 0), b = busiestPrWeek(c);
+    const label = c.login + ": " + fmt(total) + " PRs over " + weeks.length + " week" + (weeks.length === 1 ? "" : "s") + ", busiest " + b.week + " (" + fmt(b.prs) + ")";
+    const cell = el("span", { class: "prw", tabindex: "0", role: "img", "aria-label": label }, spark);
+    const recent = weeks.slice(-8).reverse().map((w) => [w.week, fmt(w.prs) + " opened · " + fmt(w.merged) + " merged · " + fmt(w.open) + " open · " + fmt(w.closed) + " closed"]);
+    const rows = [["PRs", fmt(total) + " over " + weeks.length + " week" + (weeks.length === 1 ? "" : "s")], ["busiest week", b.week + " (" + fmt(b.prs) + ")"], ...recent];
+    const show = (e) => showTip(e, c.login + " · PRs per week", rows);
+    cell.addEventListener("pointermove", show); cell.addEventListener("focus", show); cell.addEventListener("click", show);
+    cell.addEventListener("pointerleave", hideTip); cell.addEventListener("blur", hideTip);
+    return cell;
+  }
   const PRIVATE_WHY = {
     no_token: "private repos not included: no token",
     none_visible: "no private repos visible to this token",
     listing_failed: "private repos not included: the full repository listing failed",
     user_account: "user account: public repos only",
   };
+  const repoLine = (o) => (o.private_repos ? "private repository" : "public repository") + " · PRs: " + fmt(o.totals.prs_merged) + " merged, " + fmt(o.totals.prs_open || 0) + " open, " + fmt(o.totals.prs_closed || 0) + " closed";
   const privateLine = (o) => o.private_access === "included" && !o.private_repos
     ? "private repos: none scanned (forks/archived skipped)"
     : o.private_access === "included"
@@ -584,7 +615,7 @@ footer .sig { font-family: var(--mono); }
         el("div", null, el("dt", null, "issues"), el("dd", null, fmt(t.issues))),
         el("div", null, el("dt", null, "lines"), el("dd", null, short(t.additions + t.deletions))),
       ),
-      el("div", { class: "muted", style: "font-size:12px" }, privateLine(o)),
+      el("div", { class: "muted", style: "font-size:12px" }, o.kind === "repository" ? repoLine(o) : privateLine(o)),
       el("div", { class: "muted", style: "font-size:11px" }, "commits, last 52 weeks"),
       sparkline((o.weekly || []).slice(-52).map((p) => p.commits), 240, 30),
       o.incomplete_repos && o.incomplete_repos.length ? el("div", { class: "muted", style: "font-size:12px" }, "▲ stats still computing for " + o.incomplete_repos.length + " repo(s); run devstats again for complete numbers") : null,
@@ -600,10 +631,13 @@ footer .sig { font-family: var(--mono); }
     ["deletions", "−lines", (c) => c.deletions],
     ["prs", "PRs", (c) => c.prs],
     ["prs_merged", "merged", (c) => c.prs_merged],
+    ["prs_open", "open", (c) => c.prs_open || 0],
+    ["prs_closed", "closed", (c) => c.prs_closed || 0],
     ["issues", "issues", (c) => c.issues],
     ["repos", "repos", (c) => c.repos],
     ["share", "share", (c) => c.share, "l"],
     ["activity", "52 weeks", null, "l"],
+    ["pr_activity", "PRs / week", null, "l"],
   ];
   const rank = new Map(C.map((c, i) => [c, i + 1]));
   let sortKey = null, sortDir = -1, query = "";
@@ -650,10 +684,13 @@ footer .sig { font-family: var(--mono); }
         el("td", { class: "del-t" }, "−" + short(c.deletions)),
         el("td", null, fmt(c.prs)),
         el("td", null, fmt(c.prs_merged)),
+        el("td", null, fmt(c.prs_open || 0)),
+        el("td", null, fmt(c.prs_closed || 0)),
         el("td", null, fmt(c.issues)),
         el("td", null, fmt(c.repos)),
         el("td", { class: "l" }, share),
         el("td", { class: "l" }, sparkline(c.activity || [], 92, 20)),
+        el("td", { class: "l" }, prWeeksCell(c)),
       );
     }));
     $("none").hidden = rows.length > 0;
