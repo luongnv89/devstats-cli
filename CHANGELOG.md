@@ -2,16 +2,32 @@
 
 ## Unreleased
 
+## v0.3.0 — 2026-11-27
+
 ### Features
-- Scan a single repository: pass `https://github.com/OWNER/REPO` (any page of it) or `OWNER/REPO` to rank who contributed to that project. `--period`, `--since` and `--until` apply as usual. The org listing is skipped, a named repository is scanned even when it is a fork or archived, and a repository whose owner is also scanned as a whole is counted once.
-- Add `--pr-weeks`: each contributor's pull requests per week (opened, merged, still open, closed), grouped by the week they were opened. The table gets a "pull requests per week" box, TSV prints one `login, week, prs, merged, open, closed` line per contributor and week, the JSON always carries `contributors[].pr_weeks`, and the HTML table gets a "PRs / week" sparkline column with the weekly numbers on hover.
-- Break pull requests down per contributor into merged, still open, and closed without merging: new `prs_open` and `prs_closed` fields in the JSON (contributors and totals), two new table columns, the HTML report, and two new TSV fields appended at the end.
+- Scan a single repository: pass `https://github.com/OWNER/REPO` (any page of it) or `OWNER/REPO` to rank who contributed to that project. `--period`, `--since` and `--until` apply as usual. The org listing is skipped, a named repository is scanned even when it is a fork or archived, and a repository whose owner is also scanned as a whole is counted once. (#11, #10) @luongnv89
+- Add `--pr-weeks`: each contributor's pull requests per week (opened, merged, still open, closed), grouped by the week they were opened. The table gets a "pull requests per week" box, TSV prints one `login, week, prs, merged, open, closed` line per contributor and week, the JSON always carries `contributors[].pr_weeks`, and the HTML table gets a "PRs / week" sparkline column with the weekly numbers on hover. (#11, #10) @luongnv89
+- Break pull requests down per contributor into merged, still open, and closed without merging: new `prs_open` and `prs_closed` fields in the JSON (contributors and totals), two new table columns, the HTML report, and two new TSV fields appended at the end. (#11, #10) @luongnv89
 
 ### Upgrade notes
-- A URL with a repository path, such as `https://github.com/Montimage/mmt-probe`, used to scan the whole `Montimage` organization. It now scans only that repository; pass `https://github.com/Montimage` for the whole organization.
-- TSV lines have two more fields at the end (`prs_open`, `prs_closed`).
-- The positional argument in `--help` is now `TARGET` instead of `ORG`.
-- Building from source now needs Rust 1.88 or newer (was 1.82). Run `rustup update` before `cargo install`.
+- A URL with a repository path, such as `https://github.com/Montimage/mmt-probe`, used to scan the whole `Montimage` organization. It now scans only that repository; pass `https://github.com/Montimage` for the whole organization. (#11, #10) @luongnv89
+- TSV lines have two more fields at the end (`prs_open`, `prs_closed`). (#11, #10) @luongnv89
+- The positional argument in `--help` is now `TARGET` instead of `ORG`. (#11, #10) @luongnv89
+- Building from source now needs Rust 1.88 or newer (was 1.82). Run `rustup update` before `cargo install` (#13, #12, #14) @luongnv89
+
+### Documentation
+- Add the devstats logo to the README header, with light and dark variants that follow the GitHub theme @luongnv89
+
+### Dependencies
+- Update `url` from 2.5.8 to 2.5.9 to fix RUSTSEC-2026-0592 (#13, #12) @luongnv89
+
+### Other Changes
+- Add pre-commit and pre-push hooks (`cargo fmt`, clippy, `cargo audit`, unit tests, the full test suite and a network-free end-to-end script), and a leaner CI that verifies the hooks on pull requests and runs the ubuntu/macOS × stable/beta matrix plus the MSRV build on merges to main (#13, #12) @luongnv89
+- Fix the release workflow: replace the retired `macos-13` runner with `macos-15-intel`, add a `tag` input to upload binaries to an existing release, and add job timeouts (#13, #12) @luongnv89
+- Add CODEOWNERS for the hook config, workflows, scripts, tests and `Cargo.toml` (#13, #12) @luongnv89
+- Add the devstats logo set (SVG variants, PNG exports) and a brand showcase page under `assets/logo/` @luongnv89
+
+**Full Changelog**: https://github.com/luongnv89/devstats-cli/compare/v0.2.0...v0.3.0
 
 ## v0.2.0 — 2026-11-18
 

@@ -9,7 +9,7 @@
 
 # Rank every contributor across your GitHub organizations
 
-`devstats` scans every repository in one or more organizations and counts commits, lines,
+`devstats` scans every repository in one or more organizations, or one repository you name, and counts commits, lines,
 pull requests, and issues per person. Results come out as a ranked terminal table, JSON, TSV,
 or one offline HTML report.
 
@@ -217,6 +217,16 @@ brew install luongnv89/tap/devstats
 ## Reference
 
 <details>
+<summary>Upgrading from v0.2.0</summary>
+
+- **A repository link scans only that repository.** Before v0.3.0, `https://github.com/OWNER/REPO` scanned the whole `OWNER` organization. To scan a whole organization, pass its link (`https://github.com/OWNER`) or its name.
+- **TSV lines have two more fields at the end**, `prs_open` and `prs_closed`. The first nine fields are unchanged; update scripts that expect exactly nine.
+- **Building from source needs Rust 1.88 or newer** (was 1.82). Run `rustup update` before `cargo install`. Homebrew installs are not affected.
+- **`--help` names the argument `TARGET` instead of `ORG`**, since it can be a repository as well as an organization. Commands stay the same.
+
+</details>
+
+<details>
 <summary>Install options</summary>
 
 With Homebrew (macOS and Linux):
@@ -247,7 +257,7 @@ given as a whole is counted once. An unknown name prints a warning and the other
 
 | Option | Default | What it does |
 |---|---|---|
-| `--html [PATH]` | `devstats-report.html` | Also write the HTML report. Put it after the orgs, or use `--html=PATH` |
+| `--html [PATH]` | `devstats-report.html` | Also write the HTML report. Put it after the targets, or use `--html=PATH` |
 | `-f, --format` | `table` | `table`, `json`, or `tsv` on stdout |
 | `-s, --sort` | `commits` | `commits`, `additions`, `deletions`, `lines`, `prs`, `issues`, `repos` |
 | `-n, --top N` | `25` | Show the top N contributors; `0` shows everyone |
@@ -346,10 +356,12 @@ For a user account, GitHub lists only public repositories, so only those are sca
   PRs, oldest first, with a bar scaled to the busiest week.
 - **`--format json`:** the full report: totals, per-organization breakdowns, the weekly
   series, the 52-week activity of each contributor, and their PRs per week
-  (`contributors[].pr_weeks`: `week`, `prs`, `merged`, `open`, `closed`).
+  (`contributors[].pr_weeks`: `week`, `prs`, `merged`, `open`, `closed`). Contributors and
+  totals carry `prs_open` and `prs_closed` next to `prs` and `prs_merged`.
 - **`--html`:** one offline HTML file with KPI tiles, ranked bars with a metric switch, code
   churn, the weekly commit timeline, organization cards, and a sortable, searchable
-  contributor table. It has light and dark themes and prints cleanly.
+  contributor table with merged, open, and closed PR columns and a "PRs / week" sparkline
+  (hover for the weekly numbers). It has light and dark themes and prints cleanly.
 
 </details>
 
