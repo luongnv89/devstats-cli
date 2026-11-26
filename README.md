@@ -5,7 +5,7 @@
 
 [![CI](https://github.com/luongnv89/devstats-cli/actions/workflows/ci.yml/badge.svg)](https://github.com/luongnv89/devstats-cli/actions/workflows/ci.yml)
 [![license](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
-[![rust](https://img.shields.io/badge/rust-1.82%2B-orange)](https://www.rust-lang.org)
+[![rust](https://img.shields.io/badge/rust-1.85%2B-orange)](https://www.rust-lang.org)
 
 # Rank every contributor across your GitHub organizations
 
@@ -64,7 +64,7 @@ Install with Homebrew (macOS and Linux):
 brew install luongnv89/tap/devstats
 ```
 
-Or build from source (Rust 1.82 or newer):
+Or build from source (Rust 1.85 or newer):
 
 ```bash
 cargo install --git https://github.com/luongnv89/devstats-cli
@@ -225,7 +225,7 @@ With Homebrew (macOS and Linux):
 brew install luongnv89/tap/devstats
 ```
 
-From source (Rust 1.82 or newer):
+From source (Rust 1.85 or newer):
 
 ```bash
 cargo install --git https://github.com/luongnv89/devstats-cli

@@ -1,31 +1,133 @@
 name: CI
 
+# Shift-left: fmt, clippy, cargo-audit, unit/full tests and the CLI E2E run as
+# pre-commit hooks (.pre-commit-config.yaml). CI only proves they were not
+# bypassed on pull requests, and runs the version matrix on merges to main.
 on:
   push:
     branches: [main]
   pull_request:
+    branches: [main]
 
 permissions:
   contents: read
 
+# A new push to a PR cancels its superseded run. Other events have no PR number,
+# fall back to their unique run ID, and are never cancelled.
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
   cancel-in-progress: true
 
-# Ubuntu only: on a private repo, macOS minutes bill at 10x and Windows at 2x.
-# Release builds (release.yml) still cover Linux, macOS, and Windows.
 jobs:
-  test:
+  # PRs are where bypassed commits enter. Gating the job on pull_request also
+  # avoids github.event.before, which is all zeros on a branch's first push.
+  hooks:
+    name: Verify hooks were not bypassed
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        # Public repos run free: one parallel leg per stage. Anything not
+        # provably public pays per job: one leg, commit stage first.
+        stages: ${{ fromJSON(github.event.repository.visibility == 'public' && '["pre-commit", "pre-push"]' || '["pre-commit pre-push"]') }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
+        with:
+          # --from-ref needs the base SHA locally; blobless keeps it cheap.
+          fetch-depth: 0
+          filter: blob:none
+
+      # The project toolchain: language: system hooks shell out to it.
       - uses: dtolnay/rust-toolchain@stable
         with:
-          components: clippy, rustfmt
+          components: rustfmt, clippy
+
+      # Same shared-key as the ubuntu/stable matrix leg, which seeds it from main.
       - uses: Swatinem/rust-cache@v2
-      - name: fmt
-        run: cargo fmt --all -- --check
-      - name: clippy
-        run: cargo clippy --all-targets -- -D warnings
-      - name: test
-        run: cargo test --locked
+        with:
+          shared-key: linux-stable
+
+      # Prebuilt binary for the cargo-audit hook (no compile).
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      - name: Cache pre-commit environments
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/pre-commit
+          key: pre-commit-${{ runner.os }}-${{ env.pythonLocation }}-${{ hashFiles('.pre-commit-config.yaml') }}
+
+      # A PR must not loosen the rules that judge it. When it changes hook
+      # config, a workflow or a hook script, run the stage(s) with the base
+      # branch's config first, before any hook the PR controls can run.
+      - name: Re-run the base branch's hooks if the PR changes them
+        run: |
+          export GIT_NO_REPLACE_OBJECTS=1
+          pip install pre-commit
+          base="${{ github.event.pull_request.base.sha }}"
+          gate="$RUNNER_TEMP/base-hook-gate.py"
+          git show "$base:scripts/base-hook-gate.py" > "$gate" 2>/dev/null || cp scripts/base-hook-gate.py "$gate"
+          python "$gate" --base "$base" ${{ matrix.stages }}
+
+      # The only overlap with pre-commit, scoped to the PR diff. Every stage
+      # runs in some leg: pre-commit run alone skips the pre-push suite and E2E.
+      - name: Run the hook stage(s) over the PR diff
+        run: |
+          pip install pre-commit
+          base="${{ github.event.pull_request.base.sha }}"
+          for stage in ${{ matrix.stages }}; do
+            pre-commit run --show-diff-on-failure --hook-stage "$stage" --from-ref "$base" --to-ref HEAD
+          done
+
+  # Version matrix on merges to main (public repo: free). Doubles as the
+  # full-suite backstop and seeds the caches every PR restores.
+  matrix-test:
+    name: test (${{ matrix.os }}, ${{ matrix.rust }})
+    if: github.event_name == 'push'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        rust: [stable, beta]
+        include:
+          # MSRV: keep in step with rust-version in Cargo.toml.
+          - { os: ubuntu-latest, rust: '1.85' }
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ matrix.rust }}
+          components: ${{ (matrix.os == 'ubuntu-latest' && matrix.rust == 'stable') && 'rustfmt, clippy' || '' }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: ${{ (matrix.os == 'ubuntu-latest' && matrix.rust == 'stable') && 'linux-stable' || format('{0}-{1}', matrix.os, matrix.rust) }}
+
+      - name: Run tests
+        run: cargo test --all-features --locked
+
+      - name: Build release
+        run: cargo build --release --locked
+
+      # Seed the guard's pre-commit environment cache from main (ubuntu/stable only).
+      - if: matrix.os == 'ubuntu-latest' && matrix.rust == 'stable'
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - if: matrix.os == 'ubuntu-latest' && matrix.rust == 'stable'
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/pre-commit
+          key: pre-commit-${{ runner.os }}-${{ env.pythonLocation }}-${{ hashFiles('.pre-commit-config.yaml') }}
+      - if: matrix.os == 'ubuntu-latest' && matrix.rust == 'stable'
+        run: pip install pre-commit && pre-commit install-hooks
