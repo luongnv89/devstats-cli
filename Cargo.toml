@@ -2,7 +2,7 @@
 name = "devstats"
 version = "0.2.0"
 edition = "2021"
-rust-version = "1.85"
+rust-version = "1.88"
 description = "Contribution stats for every contributor across GitHub organizations, in the terminal or as an HTML report"
 license = "Apache-2.0"
 repository = "https://github.com/luongnv89/devstats-cli"

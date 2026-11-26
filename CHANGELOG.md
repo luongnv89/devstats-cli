@@ -11,6 +11,7 @@
 - A URL with a repository path, such as `https://github.com/Montimage/mmt-probe`, used to scan the whole `Montimage` organization. It now scans only that repository; pass `https://github.com/Montimage` for the whole organization.
 - TSV lines have two more fields at the end (`prs_open`, `prs_closed`).
 - The positional argument in `--help` is now `TARGET` instead of `ORG`.
+- Building from source now needs Rust 1.88 or newer (was 1.82). Run `rustup update` before `cargo install`.
 
 ## v0.2.0 — 2026-11-18
 
