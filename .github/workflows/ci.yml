@@ -98,7 +98,7 @@ jobs:
         rust: [stable, beta]
         include:
           # MSRV: keep in step with rust-version in Cargo.toml.
-          - { os: ubuntu-latest, rust: '1.85' }
+          - { os: ubuntu-latest, rust: '1.88' }
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     steps:
