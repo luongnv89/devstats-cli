@@ -171,6 +171,9 @@ svg { display: block; overflow: visible; }
 .cross { stroke: var(--line-strong); stroke-width: 1; stroke-dasharray: 3 3; }
 .cross-dot { fill: var(--bg); stroke: var(--data-line); stroke-width: 2px; }
 .spark { fill: none; stroke: var(--data-line); stroke-width: 1.5px; stroke-linejoin: round; }
+.prw { display: inline-block; line-height: 0; border-radius: 3px; cursor: default; }
+.prw:focus { outline: none; }
+.prw:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 .empty { font: 13px var(--mono); color: var(--muted); padding: 22px 0; }
 
 .tip {
@@ -571,6 +574,20 @@ footer .sig { font-family: var(--mono); }
     s.append(svg("path", { class: "spark", d }));
     return s;
   }
+  /* PRs / week cell: focusable, labelled, and shows the shared #tip on hover, focus and tap. */
+  function prWeeksCell(c) {
+    const weeks = c.pr_weeks || [], spark = sparkline(prSeries(c), 92, 20);
+    if (!weeks.length) return el("span", { class: "prw" }, spark, el("span", { class: "sr" }, c.login + ": no pull requests"));
+    const total = weeks.reduce((a, w) => a + w.prs, 0), b = busiestPrWeek(c);
+    const label = c.login + ": " + fmt(total) + " PRs over " + weeks.length + " week" + (weeks.length === 1 ? "" : "s") + ", busiest " + b.week + " (" + fmt(b.prs) + ")";
+    const cell = el("span", { class: "prw", tabindex: "0", role: "img", "aria-label": label }, spark);
+    const recent = weeks.slice(-8).reverse().map((w) => [w.week, fmt(w.prs) + " opened · " + fmt(w.merged) + " merged · " + fmt(w.open) + " open · " + fmt(w.closed) + " closed"]);
+    const rows = [["PRs", fmt(total) + " over " + weeks.length + " week" + (weeks.length === 1 ? "" : "s")], ["busiest week", b.week + " (" + fmt(b.prs) + ")"], ...recent];
+    const show = (e) => showTip(e, c.login + " · PRs per week", rows);
+    cell.addEventListener("pointermove", show); cell.addEventListener("focus", show); cell.addEventListener("click", show);
+    cell.addEventListener("pointerleave", hideTip); cell.addEventListener("blur", hideTip);
+    return cell;
+  }
   const PRIVATE_WHY = {
     no_token: "private repos not included: no token",
     none_visible: "no private repos visible to this token",
@@ -673,7 +690,7 @@ footer .sig { font-family: var(--mono); }
         el("td", null, fmt(c.repos)),
         el("td", { class: "l" }, share),
         el("td", { class: "l" }, sparkline(c.activity || [], 92, 20)),
-        el("td", { class: "l", title: (c.pr_weeks || []).map((w) => w.week + ": " + w.prs + " opened, " + w.merged + " merged, " + w.open + " open, " + w.closed + " closed").join("\n") }, sparkline(prSeries(c), 92, 20)),
+        el("td", { class: "l" }, prWeeksCell(c)),
       );
     }));
     $("none").hidden = rows.length > 0;
