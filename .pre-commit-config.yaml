@@ -1,0 +1,72 @@
+# Shift-left quality gates. Install both hook types once per clone:
+#   pre-commit install && pre-commit install --hook-type pre-push
+# Hooks with no "stages:" run in EVERY stage; default_stages keeps them on commit only.
+# Hooks whose own manifest sets stages (trailing-whitespace, end-of-file-fixer,
+# check-added-large-files) keep theirs and also run on push.
+default_stages: [pre-commit]
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-toml
+      - id: check-merge-conflict
+      - id: check-added-large-files
+
+  - repo: local
+    hooks:
+      # Timings measured 2026-11-26 on a laptop with a warm target/.
+      - id: cargo-fmt
+        name: cargo fmt
+        entry: cargo fmt --
+        language: system
+        types: [rust]
+
+      # 1.4s.
+      - id: cargo-clippy
+        name: cargo clippy
+        entry: cargo clippy --all-targets --all-features --locked -- -D warnings
+        language: system
+        files: \.rs$|^Cargo\.(toml|lock)$
+        pass_filenames: false
+
+      # RustSec advisories, only when dependencies change (1.2s). Fetches the
+      # advisory DB, so it needs the network. env -u: under `git commit`, git
+      # exports GIT_INDEX_FILE, and cargo-audit's git fetch of the advisory DB
+      # would otherwise overwrite this repo's index with the DB's files.
+      - id: cargo-audit
+        name: cargo audit
+        entry: env -u GIT_INDEX_FILE -u GIT_DIR -u GIT_WORK_TREE cargo audit
+        language: system
+        files: ^Cargo\.(toml|lock)$
+        pass_filenames: false
+
+      # Unit tests on every commit: the crate's lib tests (58 tests, 1.3s).
+      - id: cargo-test-unit
+        name: cargo unit tests
+        entry: cargo test --lib --locked
+        language: system
+        files: \.rs$|^Cargo\.(toml|lock)$
+        pass_filenames: false
+        require_serial: true
+
+      # Unit + integration + doc tests on push (4-7s, well under the 60s budget).
+      # always_run: a deletion-only push passes no file and would skip it.
+      - id: cargo-test-full
+        name: cargo full test suite
+        entry: cargo test --all-features --locked
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-push]
+
+      # Drives the built binary end to end, network-free.
+      - id: e2e-cli
+        name: CLI end-to-end tests
+        entry: bash scripts/e2e_test.sh
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-push]

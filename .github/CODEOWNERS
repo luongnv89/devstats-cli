@@ -1,0 +1,7 @@
+# Changes to the quality gates need the owner's review (binds once branch
+# protection requires review from code owners).
+/.pre-commit-config.yaml  @luongnv89
+/.github/workflows/       @luongnv89
+/scripts/                 @luongnv89
+/tests/                   @luongnv89
+/Cargo.toml               @luongnv89
