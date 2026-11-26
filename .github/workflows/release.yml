@@ -1,9 +1,18 @@
 name: Release
 
 # Push a tag like v0.1.0 to build binaries and attach them to a GitHub release.
+# To rebuild an existing tag's binaries: gh workflow run release.yml -f tag=v0.2.0
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing tag to build and attach binaries to
+        required: true
+
+env:
+  TAG: ${{ inputs.tag || github.ref_name }}
 
 permissions:
   contents: write
@@ -12,17 +21,20 @@ jobs:
   build:
     name: build (${{ matrix.target }})
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
         include:
           - { os: ubuntu-latest, target: x86_64-unknown-linux-gnu, archive: tar.gz }
           - { os: ubuntu-24.04-arm, target: aarch64-unknown-linux-gnu, archive: tar.gz }
-          - { os: macos-13, target: x86_64-apple-darwin, archive: tar.gz }
+          - { os: macos-15-intel, target: x86_64-apple-darwin, archive: tar.gz }
           - { os: macos-latest, target: aarch64-apple-darwin, archive: tar.gz }
           - { os: windows-latest, target: x86_64-pc-windows-msvc, archive: zip }
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
@@ -32,7 +44,7 @@ jobs:
       - name: package
         shell: bash
         run: |
-          name="devstats-${GITHUB_REF_NAME}-${{ matrix.target }}"
+          name="devstats-${TAG}-${{ matrix.target }}"
           mkdir "$name"
           cp README.md "$name/"
           if [ "${{ matrix.archive }}" = "zip" ]; then
@@ -52,14 +64,20 @@ jobs:
   release:
     needs: build
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/download-artifact@v4
         with:
           path: dist
           merge-multiple: true
       - name: checksums
-        run: cd dist && sha256sum * > SHA256SUMS
+        run: cd dist && sha256sum -- * > SHA256SUMS
       - name: publish
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" --generate-notes
+        run: |
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$TAG" dist/* --repo "$GITHUB_REPOSITORY" --clobber
+          else
+            gh release create "$TAG" dist/* --repo "$GITHUB_REPOSITORY" --title "$TAG" --generate-notes
+          fi
