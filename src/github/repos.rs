@@ -4,7 +4,7 @@ use serde_json::Value;
 
 use super::{unexpected, Client, Pages};
 use crate::error::Result;
-use crate::model::PrivateAccess;
+use crate::model::{PrivateAccess, RepoTarget};
 
 #[derive(Debug, Clone)]
 pub struct Owner {
@@ -56,6 +56,44 @@ pub fn owner(client: &Client, login: &str) -> Result<Option<Owner>> {
             .map(str::to_string)
             .unwrap_or_else(|| format!("https://github.com/{login}")),
     }))
+}
+
+/// Look up one repository. `Ok(None)` when it does not exist or the token cannot
+/// read it (GitHub answers 404 for both). Names come back in GitHub's casing.
+pub fn repo(client: &Client, owner: &str, name: &str) -> Result<Option<(Owner, RepoTarget)>> {
+    let path = format!("/repos/{owner}/{name}");
+    let r = client.get(&path)?;
+    if r.status == 404 {
+        return Ok(None);
+    }
+    if r.status != 200 {
+        return Err(unexpected(&client.url(&path), &r));
+    }
+    let b = &r.body;
+    let o = &b["owner"];
+    let login = o["login"].as_str().unwrap_or(owner).to_string();
+    let repo_name = b["name"].as_str().unwrap_or(name).to_string();
+    Ok(Some((
+        Owner {
+            name: None,
+            is_org: o["type"].as_str() == Some("Organization"),
+            avatar_url: o["avatar_url"].as_str().unwrap_or_default().to_string(),
+            html_url: o["html_url"]
+                .as_str()
+                .map(str::to_string)
+                .unwrap_or_else(|| format!("https://github.com/{login}")),
+            login: login.clone(),
+        },
+        RepoTarget {
+            html_url: b["html_url"]
+                .as_str()
+                .map(str::to_string)
+                .unwrap_or_else(|| format!("https://github.com/{login}/{repo_name}")),
+            private: b["private"].as_bool().unwrap_or(false)
+                || b["visibility"].as_str() == Some("private"),
+            name: repo_name,
+        },
+    )))
 }
 
 /// Every repository of the owner the token can read (forks and archived included;

@@ -8,6 +8,9 @@ use clap::{Parser, ValueEnum};
 const EXAMPLES: &str = "\
 Examples:
   devstats https://github.com/Montimage
+  devstats https://github.com/Montimage/mmt-probe --period 3m
+  devstats Montimage/mmt-probe --sort prs --since 2026-01-01
+  devstats Montimage/mmt-probe --period 3m --pr-weeks
   devstats https://github.com/Montimage https://github.com/montimage-projects --top 10 --sort lines
   devstats Montimage --period 6m --html report.html
   devstats Montimage --period all
@@ -23,19 +26,20 @@ public repositories are scanned.";
 #[command(
     name = "devstats",
     version,
-    about = "Contribution stats for every contributor across GitHub organizations",
-    long_about = "Collects commits, lines added/deleted, pull requests and issues for every \
-contributor in one or more GitHub organizations (or users), then prints a ranked table \
+    about = "Contribution stats for every contributor across GitHub organizations or repositories",
+    long_about = "Collects commits, lines added/deleted, pull requests (opened, merged, open, closed) \
+and issues for every contributor in one or more GitHub organizations, users, or single \
+repositories, then prints a ranked table \
 or writes a self-contained HTML report. Private organization repositories are included when \
 the token can read them; without a token only public repositories are scanned.",
     after_help = EXAMPLES
 )]
 pub struct Cli {
-    /// Organization or user: https://github.com/Montimage, github.com/Montimage, or Montimage
-    #[arg(value_name = "ORG", required_unless_present = "completions")]
+    /// Organization or user (https://github.com/Montimage, Montimage), or one repository (https://github.com/Montimage/mmt-probe, Montimage/mmt-probe)
+    #[arg(value_name = "TARGET", required_unless_present = "completions")]
     pub orgs: Vec<String>,
 
-    /// Also write a self-contained HTML report [default: devstats-report.html]. Put it after the ORGs, or use --html=PATH
+    /// Also write a self-contained HTML report [default: devstats-report.html]. Put it after the TARGETs, or use --html=PATH
     #[arg(long, value_name = "PATH", num_args = 0..=1, default_missing_value = "devstats-report.html")]
     pub html: Option<PathBuf>,
 
@@ -78,6 +82,10 @@ pub struct Cli {
     /// Also print one table per organization (table format only)
     #[arg(long)]
     pub per_org: bool,
+
+    /// Also show each contributor's pull requests per week: opened, merged, open, closed. In TSV, print one line per contributor and week instead
+    #[arg(long)]
+    pub pr_weeks: bool,
 
     /// Number of repositories fetched in parallel
     #[arg(short = 'j', long, value_name = "N", default_value_t = 6,

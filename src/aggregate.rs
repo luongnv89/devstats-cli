@@ -6,7 +6,7 @@ use chrono::{Datelike, NaiveDate, TimeZone, Utc};
 
 use crate::cli::{Period, SortKey};
 use crate::model::{
-    Contributor, OrgData, OrgReport, PrivateAccess, Range, Report, Totals, WeekPoint,
+    Contributor, OrgData, OrgReport, PrWeek, PrivateAccess, Range, Report, Totals, WeekPoint,
 };
 
 pub const WEEK: i64 = 7 * 86_400;
@@ -49,10 +49,14 @@ struct Acc {
     deletions: u64,
     prs: u64,
     prs_merged: u64,
+    prs_open: u64,
+    prs_closed: u64,
     issues: u64,
     repos: BTreeSet<String>,
     orgs: BTreeSet<String>,
     activity: Vec<u64>,
+    /// Week start -> [opened, merged, open, closed].
+    pr_weeks: BTreeMap<i64, [u64; 4]>,
 }
 
 struct Window {
@@ -105,6 +109,7 @@ fn aggregate<'a>(
 
     for org in orgs {
         let owner = &org.owner;
+        let label = org.label();
         if let Some((base, _)) = owner.html_url.rsplit_once('/') {
             web_base = base.to_string();
         }
@@ -133,7 +138,7 @@ fn aggregate<'a>(
                 if weeks.iter().any(|w| w.c > 0) {
                     acc.repos.insert(format!("{}/{}", owner.login, repo.repo));
                 }
-                acc.orgs.insert(owner.login.clone());
+                acc.orgs.insert(label.clone());
             }
         }
         for item in org
@@ -145,10 +150,17 @@ fn aggregate<'a>(
             if item.is_pr {
                 acc.prs += 1;
                 acc.prs_merged += item.merged as u64;
+                acc.prs_open += item.open as u64;
+                acc.prs_closed += (!item.open && !item.merged) as u64;
+                let wk = acc.pr_weeks.entry(week_start(item.created)).or_default();
+                wk[0] += 1;
+                wk[1] += item.merged as u64;
+                wk[2] += item.open as u64;
+                wk[3] += (!item.open && !item.merged) as u64;
             } else {
                 acc.issues += 1;
             }
-            acc.orgs.insert(owner.login.clone());
+            acc.orgs.insert(label.clone());
         }
     }
 
@@ -163,11 +175,24 @@ fn aggregate<'a>(
             deletions: a.deletions,
             prs: a.prs,
             prs_merged: a.prs_merged,
+            prs_open: a.prs_open,
+            prs_closed: a.prs_closed,
             issues: a.issues,
             repos: a.repos.len(),
             orgs: a.orgs.into_iter().collect(),
             share: 0.0,
             activity: a.activity,
+            pr_weeks: a
+                .pr_weeks
+                .into_iter()
+                .map(|(w, [prs, merged, open, closed])| PrWeek {
+                    week: week_label(w),
+                    prs,
+                    merged,
+                    open,
+                    closed,
+                })
+                .collect(),
             login: a.login,
         })
         .collect();
@@ -179,6 +204,8 @@ fn aggregate<'a>(
         totals.deletions += c.deletions;
         totals.prs += c.prs;
         totals.prs_merged += c.prs_merged;
+        totals.prs_open += c.prs_open;
+        totals.prs_closed += c.prs_closed;
         totals.issues += c.issues;
     }
     for c in &mut list {
@@ -252,15 +279,20 @@ pub fn build(orgs: &[OrgData], o: &Options) -> Report {
         .map(|org| {
             let (list, totals, weekly) = aggregate(std::iter::once(org), o);
             OrgReport {
-                login: org.owner.login.clone(),
+                login: org.label(),
                 name: org.owner.name.clone(),
-                kind: if org.owner.is_org {
+                kind: if org.repo.is_some() {
+                    "repository"
+                } else if org.owner.is_org {
                     "organization"
                 } else {
                     "user"
                 },
                 avatar_url: org.owner.avatar_url.clone(),
-                html_url: org.owner.html_url.clone(),
+                html_url: org
+                    .repo
+                    .as_ref()
+                    .map_or_else(|| org.owner.html_url.clone(), |r| r.html_url.clone()),
                 totals,
                 private_repos: org.private_repos,
                 private_access: org.private_access,
@@ -279,7 +311,8 @@ pub fn build(orgs: &[OrgData], o: &Options) -> Report {
     let mut notes: Vec<String> = vec![
         "Commits and lines come from GitHub's contributor statistics: default branch only, commits linked to a GitHub account only.".into(),
         "GitHub reports 0 added/deleted lines for repositories with 10,000 or more commits.".into(),
-        "Pull requests and issues are counted by author and creation date, across the repositories of each organization the token can read (public repositories only without a token).".into(),
+        "Pull requests and issues are counted by author and creation date, across the repositories of each organization the token can read (public repositories only without a token), or in the one repository named.".into(),
+        "Pull requests are split by their state today: merged, still open, or closed without merging.".into(),
     ];
     notes.extend(orgs.iter().filter_map(private_note));
     Report {
@@ -306,7 +339,7 @@ pub fn build(orgs: &[OrgData], o: &Options) -> Report {
 /// A note for an organization whose private repositories are not in the scan.
 fn private_note(org: &OrgData) -> Option<String> {
     let why = match org.private_access {
-        PrivateAccess::Included => return None,
+        PrivateAccess::Included | PrivateAccess::Repository => return None,
         PrivateAccess::NoToken => "no token".to_string(),
         PrivateAccess::NoneVisible => "none visible to this token".to_string(),
         PrivateAccess::ListingFailed => format!(
@@ -358,6 +391,7 @@ mod tests {
                 avatar_url: String::new(),
                 html_url: format!("https://github.com/{login}"),
             },
+            repo: None,
             repos_scanned: repos.iter().map(|(n, _)| n.to_string()).collect(),
             repos_skipped: 0,
             private_repos: 0,
@@ -381,6 +415,7 @@ mod tests {
             is_bot: login.ends_with("[bot]"),
             is_pr,
             merged,
+            open: false,
             created: d(created),
         }
     }
@@ -544,6 +579,85 @@ mod tests {
             week_label(week_start(d("2026-11-18")))
         );
         assert_eq!(r.weekly.iter().map(|p| p.commits).sum::<u64>(), 38);
+    }
+
+    #[test]
+    fn pr_states_and_repo_targets() {
+        let mut orgs = fixture();
+        orgs[0].items.push(item("alice", true, false, "2026-02-01"));
+        orgs[0].items.push(Item {
+            open: true,
+            ..item("alice", true, false, "2026-03-01")
+        });
+        orgs[1].repo = Some(crate::model::RepoTarget {
+            name: "lib".into(),
+            html_url: "https://github.com/beta/lib".into(),
+            private: false,
+        });
+        orgs[1].private_access = PrivateAccess::Repository;
+        let r = build(&orgs, &opts());
+        let alice = r.contributors.iter().find(|c| c.login == "alice").unwrap();
+        assert_eq!(
+            (
+                alice.prs,
+                alice.prs_merged,
+                alice.prs_open,
+                alice.prs_closed
+            ),
+            (3, 1, 1, 1)
+        );
+        let bob = r.contributors.iter().find(|c| c.login == "Bob").unwrap();
+        assert_eq!((bob.prs, bob.prs_open, bob.prs_closed), (1, 0, 1));
+        assert_eq!(bob.orgs, ["acme", "beta/lib"]);
+        assert_eq!(
+            bob.html_url, "https://github.com/Bob",
+            "contributor links stay at the host root"
+        );
+        assert_eq!((r.totals.prs_open, r.totals.prs_closed), (1, 2));
+        assert_eq!(r.orgs[1].login, "beta/lib");
+        assert_eq!(r.orgs[1].kind, "repository");
+        assert_eq!(r.orgs[1].html_url, "https://github.com/beta/lib");
+        assert!(!r.notes.iter().any(|n| n.starts_with("beta")));
+    }
+
+    #[test]
+    fn pr_weeks_group_by_creation_week_and_state() {
+        let mut orgs = fixture();
+        orgs[0].items.extend([
+            item("alice", true, false, "2026-01-08"), // same week as 2026-01-06 (Sun 01-04)
+            Item {
+                open: true,
+                ..item("alice", true, false, "2026-02-03")
+            },
+            item("alice", false, false, "2026-02-03"), // an issue: not a PR week
+        ]);
+        let r = build(&orgs, &opts());
+        let alice = r.contributors.iter().find(|c| c.login == "alice").unwrap();
+        let weeks: Vec<_> = alice
+            .pr_weeks
+            .iter()
+            .map(|w| (w.week.as_str(), w.prs, w.merged, w.open, w.closed))
+            .collect();
+        assert_eq!(
+            weeks,
+            [("2026-01-04", 2, 1, 0, 1), ("2026-02-01", 1, 0, 1, 0)]
+        );
+        assert_eq!(alice.pr_weeks.iter().map(|w| w.prs).sum::<u64>(), alice.prs);
+        let r = build(
+            &orgs,
+            &Options {
+                since: Some(d("2026-02-01")),
+                ..opts()
+            },
+        );
+        let alice = r.contributors.iter().find(|c| c.login == "alice").unwrap();
+        assert_eq!(
+            alice.pr_weeks.len(),
+            1,
+            "weeks outside the range are dropped"
+        );
+        let carol = r.contributors.iter().find(|c| c.login == "carol");
+        assert!(carol.is_none_or(|c| c.pr_weeks.is_empty()));
     }
 
     #[test]

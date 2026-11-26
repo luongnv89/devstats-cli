@@ -26,6 +26,7 @@ fn help_lists_every_option() {
         "--exclude-archived",
         "--include-bots",
         "--per-org",
+        "--pr-weeks",
         "--jobs",
         "--token",
         "--api-url",
@@ -72,7 +73,7 @@ fn missing_org_is_a_usage_error() {
     devstats()
         .assert()
         .code(2)
-        .stderr(predicate::str::contains("<ORG>"));
+        .stderr(predicate::str::contains("<TARGET>"));
 }
 
 #[test]
